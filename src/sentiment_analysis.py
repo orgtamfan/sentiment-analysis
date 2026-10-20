@@ -48,6 +48,15 @@ def load_dataset(input_path: Path) -> pd.DataFrame:
         raise ValueError("Required columns cannot contain empty values.")
     if dataset["text"].eq("").any():
         raise ValueError("Text entries cannot be empty.")
+    if "review_status" in dataset.columns:
+        pending_review = dataset["review_status"].astype("string").str.strip().eq(
+            "needs_review"
+        )
+        if pending_review.any():
+            raise ValueError(
+                "Dataset contains comments marked needs_review. "
+                "Review the VADER suggestions and update review_status before analysis."
+            )
 
     unknown_games = sorted(set(dataset["game"].dropna()) - set(GAMES))
     if unknown_games:

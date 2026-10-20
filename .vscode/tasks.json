@@ -16,6 +16,49 @@
 			"isBackground": false,
 			"problemMatcher": [],
 			"group": "test"
+		},
+		{
+			"label": "Generate VADER label suggestions",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"-m",
+				"src.prepare_labels"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Analyze labeled Reddit comments",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"-m",
+				"src.sentiment_analysis",
+				"--input",
+				"data/processed/reddit_comments_label_review.csv",
+				"--test-size",
+				"0.2"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Analyze reviewed Reddit comments",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"-m",
+				"src.sentiment_analysis",
+				"--input",
+				"data/processed/reddit_comments_labeled.csv",
+				"--test-size",
+				"0.2",
+				"--random-state",
+				"42"
+			],
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	]
 }
