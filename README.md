@@ -68,8 +68,8 @@ Kolom wajib untuk analisis:
 
 | Kolom | Nilai |
 |---|---|
-| `game` | `cs2` atau `valorant` |
-| `text` | Teks komentar |
+| `game` | `Counter Strike 2` dan `Valorant` |
+| `text` | Teks unggahan/komentar yang dianonimkan |
 | `sentiment` | `positive`, `neutral`, atau `negative` |
 
 Kolom lain boleh dipertahankan. Jika ada kolom `review_status`, analisis akan menolak baris yang masih berstatus `needs_review`. Kedua game harus tersedia dan setiap kelas sentimen memerlukan setidaknya dua contoh per game; untuk split stratified 80:20, jumlah lebih besar mungkin diperlukan agar seluruh kelas terwakili di train dan test.
