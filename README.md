@@ -46,7 +46,7 @@ CSV wajib memiliki kolom:
 
 | Kolom | Isi |
 |---|---|
-| `game` | `cs2` atau `valorant` |
+| `game` | `Counter Strike 2` dan `Valorant` |
 | `text` | Teks unggahan/komentar yang dianonimkan |
 | `sentiment` | `positive`, `neutral`, atau `negative` |
 
