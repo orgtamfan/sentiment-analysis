@@ -1,30 +1,30 @@
-# Analisis Sentimen Komunitas CS2 dan VALORANT di Reddit
+# Sentiment Analysis of CS2 and VALORANT Communities on Reddit
 
-Workspace penelitian untuk **“Analisis Perbandingan Sentimen Komunitas Pemain Counter-Strike 2 dan VALORANT pada Reddit Menggunakan Algoritma Naive Bayes”**.
+Research workspace for **"A Comparative Sentiment Analysis of Counter-Strike 2 and VALORANT Player Communities on Reddit Using the Naive Bayes Algorithm."**
 
-Proyek ini menggunakan komentar Reddit sebagai unit analisis. VADER dipakai untuk menghasilkan **saran label awal** yang perlu ditinjau, sedangkan TF-IDF dan Multinomial Naive Bayes digunakan sebagai baseline klasifikasi tiga kelas: `positive`, `neutral`, dan `negative`.
+This project uses Reddit comments as the unit of analysis. VADER generates **initial label suggestions** for review, while TF-IDF and Multinomial Naive Bayes are used as a three-class classification baseline: `positive`, `neutral`, and `negative`.
 
-## Struktur workspace
+## Workspace structure
 
 ```text
 data/
-  raw/                  # Data Reddit mentah, misalnya reddit_comments_raw.json
-  processed/            # CSV saran label dan CSV label final
-reports/                # Laporan distribusi dan evaluasi model
+  raw/                  # Raw Reddit data, for example reddit_comments_raw.json
+  processed/            # CSV files with label suggestions and final labels
+reports/                # Label distribution and model evaluation reports
 src/
-  prepare_labels.py     # Menghasilkan saran label VADER untuk ditinjau
-  sentiment_analysis.py # Training dan evaluasi Naive Bayes per game
-tests/                  # Tes otomatis
+  prepare_labels.py     # Generate VADER label suggestions for review
+  sentiment_analysis.py # Train and evaluate a Naive Bayes model per game
+tests/                  # Automated tests
 README.md
 requirements.txt
 pyproject.toml
 ```
 
-Data lokal di `data/raw/`, `data/processed/`, dan keluaran di `reports/` diabaikan oleh Git. Jangan commit dataset yang berisi informasi pribadi atau data yang tidak berhak dipublikasikan.
+Local data in `data/raw/` and `data/processed/`, and generated output in `reports/`, are ignored by Git. Do not commit datasets containing personal information or data you are not authorized to publish.
 
-## Persiapan environment
+## Environment setup
 
-Gunakan Python 3.10 atau lebih baru. Di PowerShell:
+Use Python 3.10 or later. In PowerShell:
 
 ```powershell
 py -m venv .venv
@@ -32,84 +32,84 @@ py -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-Jika aktivasi environment diblokir, gunakan `.\.venv\Scripts\python.exe` untuk menjalankan perintah Python.
+If environment activation is blocked, use `.\.venv\Scripts\python.exe` to run Python commands.
 
-## 1. Siapkan saran label
+## 1. Prepare label suggestions
 
-Letakkan file JSON mentah di `data/raw/reddit_comments_raw.json`. JSON harus berupa daftar objek komentar, dengan setidaknya kolom `game` dan `comment_text`. Nama game yang dikenali adalah `CS2` dan `VALORANT`.
+Place the raw JSON file at `data/raw/reddit_comments_raw.json`. The JSON must be a list of comment objects containing at least the `game` and `comment_text` fields. Recognized game names are `CS2` and `VALORANT`.
 
-Jalankan:
+Run:
 
 ```powershell
 python -m src.prepare_labels
 ```
 
-Secara default, skrip membaca `data/raw/reddit_comments_raw.json` dan menghasilkan `data/processed/reddit_comments_label_review.csv`. Opsi file input/output:
+By default, the script reads `data/raw/reddit_comments_raw.json` and creates `data/processed/reddit_comments_label_review.csv`. Specify alternate input and output files with:
 
 ```powershell
 python -m src.prepare_labels --input data/raw/reddit_comments_raw.json --output data/processed/reddit_comments_label_review.csv
 ```
 
-CSV tinjauan memuat:
+The review CSV contains:
 
-- `sentiment_suggestion`: saran VADER (`positive`, `neutral`, atau `negative`)
-- `vader_compound`: skor VADER dari -1 sampai 1
-- `sentiment`: sengaja kosong untuk diisi dengan label final setelah peninjauan
-- `review_status`: awalnya `needs_review`
-- `game`, `text`, dan metadata komentar
+- `sentiment_suggestion`: VADER suggestion (`positive`, `neutral`, or `negative`)
+- `vader_compound`: VADER score from -1 to 1
+- `sentiment`: intentionally blank for the final label after review
+- `review_status`: initially set to `needs_review`
+- `game`, `text`, and comment metadata
 
-Buka CSV tersebut di spreadsheet. Tinjau saran terhadap isi komentar dan konteksnya, isi kolom `sentiment`, kemudian ubah `review_status` menjadi `reviewed`. Simpan salinan final sebagai `data/processed/reddit_comments_labeled.csv`. Jangan menimpa JSON mentah. Skrip juga tidak menimpa file CSV tinjauan yang sudah ada.
+Open the CSV in a spreadsheet. Compare each suggestion with the comment and its context, fill in the `sentiment` column, and then change `review_status` to `reviewed`. Save the completed copy as `data/processed/reddit_comments_labeled.csv`. Do not overwrite the raw JSON. The script also will not overwrite an existing review CSV.
 
-**Penting:** VADER adalah alat bantu leksikon, bukan anotator yang selalu benar. Slang game, sarkasme, komentar sangat singkat, dan teks di luar topik dapat menghasilkan saran keliru. Label yang hanya menyalin VADER bukan ground truth independen; evaluasi model terhadap label tersebut mengukur kesesuaian dengan saran VADER, bukan akurasi terhadap anotasi manusia yang tervalidasi.
+**Important:** VADER is a lexicon-based aid, not an infallible annotator. Gaming slang, sarcasm, very short comments, and off-topic text can produce incorrect suggestions. Labels copied directly from VADER are not independent ground truth; evaluating a model against them measures agreement with VADER suggestions, not accuracy against validated human annotations.
 
-## 2. Format CSV berlabel
+## 2. Labeled CSV format
 
-Kolom wajib untuk analisis:
+Required columns for analysis:
 
-| Kolom | Nilai |
+| Column | Values |
 |---|---|
-| `game` | `Counter Strike 2` dan `Valorant` |
-| `text` | Teks unggahan/komentar yang dianonimkan |
-| `sentiment` | `positive`, `neutral`, atau `negative` |
+| `game` | `cs2` or `valorant` |
+| `text` | Anonymized post or comment text |
+| `sentiment` | `positive`, `neutral`, or `negative` |
 
-Kolom lain boleh dipertahankan. Jika ada kolom `review_status`, analisis akan menolak baris yang masih berstatus `needs_review`. Kedua game harus tersedia dan setiap kelas sentimen memerlukan setidaknya dua contoh per game; untuk split stratified 80:20, jumlah lebih besar mungkin diperlukan agar seluruh kelas terwakili di train dan test.
+Other columns may be retained. If a `review_status` column is present, analysis will reject rows still marked `needs_review`. Both games must be present, and each sentiment class needs at least two examples per game. A larger sample may be needed for an 80:20 stratified split so every class appears in both training and test sets.
 
-## 3. Training dan evaluasi
+## 3. Training and evaluation
 
-Jalankan analisis dengan pembagian stratified 80% training dan 20% testing:
+Run the analysis with an 80% training and 20% test stratified split:
 
 ```powershell
 python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.csv --test-size 0.2 --random-state 42
 ```
 
-Secara default, laporan disimpan di:
+By default, reports are saved to:
 
-- `reports/sentiment_distribution.csv` — jumlah dan proporsi label per game.
-- `reports/model_metrics.json` — akurasi, macro/weighted F1, laporan per kelas, dan confusion matrix.
+- `reports/sentiment_distribution.csv` - label counts and proportions by game.
+- `reports/model_metrics.json` - accuracy, macro/weighted F1, per-class reports, and confusion matrices.
 
-Model dibuat dan dievaluasi secara terpisah untuk CS2 dan VALORANT. Gunakan prosedur pengumpulan, penyaringan, dan anotasi yang sebanding saat membandingkan kedua komunitas.
+Models are built and evaluated separately for CS2 and VALORANT. Use comparable collection, filtering, and annotation procedures when comparing the two communities.
 
-## Hasil run terakhir
+## Most recent recorded run
 
-Run terakhir yang tersimpan menggunakan 5.000 komentar per game, pembagian 4.000 training dan 1.000 testing untuk masing-masing game, serta `random_state=42`.
+The most recent saved run used 5,000 comments per game, split into 4,000 training and 1,000 test comments for each game, with `random_state=42`.
 
-| Game | Akurasi | Macro F1 |
+| Game | Accuracy | Macro F1 |
 |---|---:|---:|
-| CS2 | 0,483 | 0,304 |
-| VALORANT | 0,512 | 0,268 |
+| CS2 | 0.483 | 0.304 |
+| VALORANT | 0.512 | 0.268 |
 
-Model baseline menunjukkan performa terbatas, terutama pada kelas negatif dan netral. Lihat confusion matrix serta metrik per kelas di `reports/model_metrics.json`; jangan hanya mengandalkan akurasi. Hasil run ini mencerminkan label di dataset saat analisis dijalankan dan bukan otomatis hasil anotasi manusia independen.
+The baseline model has limited performance, especially on negative and neutral classes. See the confusion matrices and per-class metrics in `reports/model_metrics.json`; do not rely on accuracy alone. This run reflects the dataset labels used at the time of analysis and does not automatically represent independent human annotations.
 
-## Menjalankan tes
+## Run the tests
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-## Batasan penelitian
+## Research limitations
 
-- Naive Bayes belajar dari label yang diberikan; ia tidak mengubah label otomatis menjadi ground truth.
-- Pembagian acak stratified bukan evaluasi lintas waktu atau lintas penulis. Duplikasi atau komentar dari post yang sama dapat membuat data train dan test berkorelasi.
-- TF-IDF dan Multinomial Naive Bayes adalah baseline. Dokumentasikan pilihan prapemrosesan dan keterbatasan untuk bahasa, slang, negasi, serta sarkasme.
-- Sentimen komentar tidak membuktikan sebab-akibat antara game dan opini komunitas.
-- Patuhi ketentuan Reddit, aturan subreddit, dan persyaratan etik yang berlaku; minimalkan penyimpanan informasi pribadi.
+- Naive Bayes learns from the supplied labels; it does not turn automatic labels into ground truth.
+- A random stratified split is not an evaluation across time or authors. Duplicate comments or comments from the same post may cause the training and test data to be correlated.
+- TF-IDF and Multinomial Naive Bayes are baseline methods. Document preprocessing choices and limitations involving language, slang, negation, and sarcasm.
+- Comment sentiment does not establish a causal relationship between a game and community opinion.
+- Follow Reddit's terms, subreddit rules, and applicable ethics requirements; minimize the storage of personal information.
