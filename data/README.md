@@ -1,32 +1,36 @@
-# Dataset Reddit Comments: CS2 vs VALORANT
+# Reddit Comments Dataset: CS2 vs. VALORANT
 
-Dataset mentah ini dikumpulkan untuk penelitian:
-**"Analisis Perbandingan Sentimen Komunitas Pemain Counter-Strike 2 dan VALORANT pada Reddit Menggunakan Algoritma Naive Bayes"**
+This raw dataset was collected for the research project:
+**"A Comparative Sentiment Analysis of Counter-Strike 2 and VALORANT Player Communities on Reddit Using the Naive Bayes Algorithm."**
 
-## 1. Struktur Folder
+## 1. Folder structure
+
 ```text
 data/
-└── raw/
-    ├── cs2_comments_raw.csv         # Komentar mentah dari r/GlobalOffensive
-    ├── valorant_comments_raw.csv    # Komentar mentah dari r/VALORANT
-    └── reddit_comments_raw.csv      # Dataset gabungan mentah (CS2 + VALORANT)
++-- raw/
+    +-- cs2_comments_raw.csv       # Raw comments from r/GlobalOffensive
+    +-- valorant_comments_raw.csv  # Raw comments from r/VALORANT
+    +-- reddit_comments_raw.csv    # Combined raw dataset (CS2 + VALORANT)
 ```
 
-## 2. Skema Data CSV
-Setiap file CSV memiliki kolom-kolom berikut:
-- `game`: Label game (`CS2` atau `VALORANT`)
-- `subreddit`: Asal subreddit (`GlobalOffensive` atau `VALORANT`)
-- `post_id`: ID postingan Reddit
-- `post_title`: Judul thread/postingan Reddit
-- `post_url`: URL postingan Reddit
-- `comment_id`: ID unik komentar
-- `comment_text`: Teks mentah komentar (tanpa lowercase, tanpa stopword removal, tanpa stemming, tanpa penghapusan tanda baca)
-- `comment_score`: Skor upvote/downvote net komentar
-- `comment_created_at`: Waktu pembuatan komentar (format ISO 8601 UTC)
-- `author`: Username pembuat komentar (metadata)
-- `scraped_at`: Timestamp proses scraping dijalankan (UTC)
+## 2. CSV schema
 
-## 3. Catatan Integritas Data
-- Teks komentar dibiarkan asli apa adanya (raw) untuk keperluan tahapan preprocessing selanjutnya.
-- Komentar `[deleted]` dan `[removed]` telah disaring otomatis saat pengumpulan data.
-- Duplikasi `comment_id` telah disaring secara otomatis.
+Each CSV file has the following columns:
+
+- `game`: Game label (`CS2` or `VALORANT`)
+- `subreddit`: Source subreddit (`GlobalOffensive` or `VALORANT`)
+- `post_id`: Reddit post ID
+- `post_title`: Reddit thread or post title
+- `post_url`: Reddit post URL
+- `comment_id`: Unique comment ID
+- `comment_text`: Raw comment text (no lowercasing, stop-word removal, stemming, or punctuation removal)
+- `comment_score`: Net upvote/downvote score for the comment
+- `comment_created_at`: Comment creation time (ISO 8601 UTC format)
+- `author`: Comment author's username (metadata)
+- `scraped_at`: Timestamp when scraping was performed (UTC)
+
+## 3. Data integrity notes
+
+- Comment text is preserved as originally written (raw) for subsequent preprocessing.
+- Comments marked `[deleted]` and `[removed]` were automatically filtered out during collection.
+- Duplicate `comment_id` values were automatically filtered out.
