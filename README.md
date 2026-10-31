@@ -19,7 +19,6 @@ reports/                                      # gitignored — regenerated on ea
 src/
   prepare_labels.py     # Generate VADER label suggestions for review
   sentiment_analysis.py # Train and evaluate a Naive Bayes model per game
-tests/                  # Automated tests
 README.md
 requirements.txt
 pyproject.toml
