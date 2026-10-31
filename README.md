@@ -100,9 +100,13 @@ To reproduce a committed snapshot, point `--output-dir` at the corresponding sub
 python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.csv --output-dir data/processed/reddit_comments_labeled_analysis
 ```
 
-## Most recent recorded run
+## Recorded runs
 
-The most recent snapshot (`data/processed/reddit_comments_labeled_analysis/`) used **5,000 comments per game**, split into 4,000 training and 1,000 test comments for each game, with `random_state=42`.
+Three model snapshots are committed under `data/processed/`. All runs use TF-IDF (unigrams + bigrams) + Multinomial Naive Bayes, 80/20 stratified split, `random_state=42`.
+
+### 1. Full dataset — `reddit_comments_labeled_analysis/`
+
+5,000 comments per game (4,000 train / 1,000 test), VADER-suggested labels reviewed and finalized.
 
 **Label distribution:**
 
@@ -118,9 +122,45 @@ The most recent snapshot (`data/processed/reddit_comments_labeled_analysis/`) us
 | CS2 | 0.483 | 0.304 | 0.357 |
 | VALORANT | 0.512 | 0.268 | 0.365 |
 
-The baseline model has limited performance, especially on negative and neutral classes. See the confusion matrices and per-class metrics in `data/processed/reddit_comments_labeled_analysis/model_metrics.json`; do not rely on accuracy alone. This run reflects the dataset labels used at the time of analysis and does not automatically represent independent human annotations.
+### 2. VADER-labeled subset — `vader_subset_600_for_repo/`
 
-Additional committed snapshots are available in `data/processed/vader_subset_600_for_repo/` (300/game, VADER-labeled) and `data/processed/manual_labeled_for_repo/` (300/game, manually labeled).
+300 comments per game (240 train / 60 test), labels taken directly from VADER suggestions without manual review.
+
+**Label distribution:**
+
+| Game | Negative | Neutral | Positive |
+|---|---:|---:|---:|
+| CS2 | 91 (30.3%) | 86 (28.7%) | 123 (41.0%) |
+| VALORANT | 79 (26.3%) | 80 (26.7%) | 141 (47.0%) |
+
+**Model results:**
+
+| Game | Accuracy | Macro F1 | Weighted F1 |
+|---|---:|---:|---:|
+| CS2 | 0.450 | 0.288 | 0.329 |
+| VALORANT | 0.467 | 0.212 | 0.297 |
+
+### 3. Manually labeled subset — `manual_labeled_for_repo/`
+
+300 comments per game (240 train / 60 test), labels assigned through manual annotation.
+
+**Label distribution:**
+
+| Game | Negative | Neutral | Positive |
+|---|---:|---:|---:|
+| CS2 | 64 (21.3%) | 135 (45.0%) | 101 (33.7%) |
+| VALORANT | 58 (19.3%) | 111 (37.0%) | 131 (43.7%) |
+
+**Model results:**
+
+| Game | Accuracy | Macro F1 | Weighted F1 |
+|---|---:|---:|---:|
+| CS2 | 0.467 | 0.283 | 0.355 |
+| VALORANT | 0.400 | 0.193 | 0.251 |
+
+---
+
+The baseline model has limited performance across all runs, especially on negative and neutral classes. See the confusion matrices and per-class metrics in the corresponding `model_metrics.json` files; do not rely on accuracy alone. Results reflect the dataset labels used at the time of analysis and do not automatically represent independent human annotations.
 
 ## Run the tests
 
