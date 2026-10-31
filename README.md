@@ -8,9 +8,14 @@ This project uses Reddit comments as the unit of analysis. VADER generates **ini
 
 ```text
 data/
-  raw/                  # Raw Reddit data, for example reddit_comments_raw.json
-  processed/            # CSV files with label suggestions and final labels
-reports/                # Label distribution and model evaluation reports
+  raw/                                        # gitignored — raw scrape output (JSON)
+  processed/
+    reddit_comments_label_review.csv          # gitignored — VADER suggestions pending review
+    reddit_comments_labeled.csv               # gitignored — final labeled dataset (full)
+    reddit_comments_labeled_analysis/         # committed — report snapshot: full 5 000/game run
+    vader_subset_600_for_repo/                # committed — report snapshot: 300/game VADER-labeled subset
+    manual_labeled_for_repo/                  # committed — report snapshot: 300/game manually labeled subset
+reports/                                      # gitignored — regenerated on each local run
 src/
   prepare_labels.py     # Generate VADER label suggestions for review
   sentiment_analysis.py # Train and evaluate a Naive Bayes model per game
@@ -20,7 +25,7 @@ requirements.txt
 pyproject.toml
 ```
 
-Local data in `data/raw/` and `data/processed/`, and generated output in `reports/`, are ignored by Git. Do not commit datasets containing personal information or data you are not authorized to publish.
+Raw data in `data/raw/`, full labeled CSVs, and the generated `reports/` directory are gitignored. Pre-computed report snapshots in `data/processed/*/` are committed for reproducibility. Do not commit datasets containing personal information or data you are not authorized to publish.
 
 ## Environment setup
 
@@ -89,16 +94,33 @@ By default, reports are saved to:
 
 Models are built and evaluated separately for CS2 and VALORANT. Use comparable collection, filtering, and annotation procedures when comparing the two communities.
 
+To reproduce a committed snapshot, point `--output-dir` at the corresponding subfolder:
+
+```powershell
+python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.csv --output-dir data/processed/reddit_comments_labeled_analysis
+```
+
 ## Most recent recorded run
 
-The most recent saved run used 5,000 comments per game, split into 4,000 training and 1,000 test comments for each game, with `random_state=42`.
+The most recent snapshot (`data/processed/reddit_comments_labeled_analysis/`) used **5,000 comments per game**, split into 4,000 training and 1,000 test comments for each game, with `random_state=42`.
 
-| Game | Accuracy | Macro F1 |
-|---|---:|---:|
-| CS2 | 0.483 | 0.304 |
-| VALORANT | 0.512 | 0.268 |
+**Label distribution:**
 
-The baseline model has limited performance, especially on negative and neutral classes. See the confusion matrices and per-class metrics in `reports/model_metrics.json`; do not rely on accuracy alone. This run reflects the dataset labels used at the time of analysis and does not automatically represent independent human annotations.
+| Game | Negative | Neutral | Positive |
+|---|---:|---:|---:|
+| CS2 | 1,381 (27.6%) | 1,414 (28.3%) | 2,205 (44.1%) |
+| VALORANT | 1,225 (24.5%) | 1,312 (26.2%) | 2,463 (49.3%) |
+
+**Model results:**
+
+| Game | Accuracy | Macro F1 | Weighted F1 |
+|---|---:|---:|---:|
+| CS2 | 0.483 | 0.304 | 0.357 |
+| VALORANT | 0.512 | 0.268 | 0.365 |
+
+The baseline model has limited performance, especially on negative and neutral classes. See the confusion matrices and per-class metrics in `data/processed/reddit_comments_labeled_analysis/model_metrics.json`; do not rely on accuracy alone. This run reflects the dataset labels used at the time of analysis and does not automatically represent independent human annotations.
+
+Additional committed snapshots are available in `data/processed/vader_subset_600_for_repo/` (300/game, VADER-labeled) and `data/processed/manual_labeled_for_repo/` (300/game, manually labeled).
 
 ## Run the tests
 

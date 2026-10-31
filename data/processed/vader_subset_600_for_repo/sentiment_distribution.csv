@@ -1,0 +1,7 @@
+game,sentiment,count,proportion
+cs2,negative,91,0.30333333333333334
+cs2,neutral,86,0.2866666666666667
+cs2,positive,123,0.41
+valorant,negative,79,0.2633333333333333
+valorant,neutral,80,0.26666666666666666
+valorant,positive,141,0.47

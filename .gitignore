@@ -6,3 +6,12 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Large raw and fully-labeled datasets — do not commit
+data/raw/
+data/processed/reddit_comments_labeled.csv
+data/processed/reddit_comments_label_review.csv
+
+# Report snapshots in data/processed/*/ are committed (see data/README.md)
+# The top-level reports/ dir is local-only (regenerated on each run)
+reports/

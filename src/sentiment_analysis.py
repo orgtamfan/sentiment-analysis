@@ -30,6 +30,9 @@ def load_dataset(input_path: Path) -> pd.DataFrame:
         raise FileNotFoundError(f"Dataset not found: {input_path}")
 
     dataset = pd.read_csv(input_path)
+    if "sentiment" not in dataset.columns and "sentiment_final" in dataset.columns:
+        dataset = dataset.rename(columns={"sentiment_final": "sentiment"})
+
     missing_columns = REQUIRED_COLUMNS - set(dataset.columns)
     if missing_columns:
         raise ValueError(
