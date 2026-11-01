@@ -2,23 +2,25 @@
 
 Research workspace for **"A Comparative Sentiment Analysis of Counter-Strike 2 and VALORANT Player Communities on Reddit Using the Naive Bayes Algorithm."**
 
-This project uses Reddit comments as the unit of analysis. VADER generates **initial label suggestions** for review, while TF-IDF and Multinomial Naive Bayes are used as a three-class classification baseline: `positive`, `neutral`, and `negative`.
+This project uses Reddit comments as the unit of analysis. VADER generates **initial label suggestions** for review, while TF-IDF and Multinomial Naive Bayes are used as a three-class classification baseline: `positive`, `neutral`, and `negative`. Inter-annotator agreement is evaluated using **Cohen's Kappa** (pairwise) and **Fleiss' Kappa** (multi-rater).
 
 ## Workspace structure
 
 ```text
 data/
-  raw/                                       
+  raw/                                        # gitignored — raw scrape output (JSON)
   processed/
-    reddit_comments_label_review.csv         
-    reddit_comments_labeled.csv               
-    reddit_comments_labeled_analysis/         
-    vader_subset_600_for_repo/                
-    manual_labeled_for_repo/                  
-reports/                                      
+    reddit_comments_label_review.csv          # gitignored — VADER suggestions pending review
+    reddit_comments_labeled.csv               # gitignored — final labeled dataset (full)
+    manual_label.csv                          # gitignored — 3-annotator manual annotation dataset
+    reddit_comments_labeled_analysis/         # committed — report snapshot: full 5 000/game run
+    vader_subset_600_for_repo/                # committed — report snapshot: 300/game VADER-labeled subset
+    manual_labeled_for_repo/                  # committed — report snapshot: 300/game manually labeled subset
+reports/                                      # gitignored — regenerated on each local run
 src/
-  prepare_labels.py     # Generate VADER label suggestions for review
-  sentiment_analysis.py # Train and evaluate a Naive Bayes model per game
+  prepare_labels.py             # Generate VADER label suggestions for review
+  sentiment_analysis.py         # Train and evaluate a Naive Bayes model per game
+  inter_annotator_agreement.py  # Cohen's Kappa, Fleiss' Kappa, and VADER agreement rate
 README.md
 requirements.txt
 pyproject.toml
@@ -66,7 +68,39 @@ Open the CSV in a spreadsheet. Compare each suggestion with the comment and its 
 
 **Important:** VADER is a lexicon-based aid, not an infallible annotator. Gaming slang, sarcasm, very short comments, and off-topic text can produce incorrect suggestions. Labels copied directly from VADER are not independent ground truth; evaluating a model against them measures agreement with VADER suggestions, not accuracy against validated human annotations.
 
-## 2. Labeled CSV format
+## 2. Inter-Annotator Agreement (Cohen's Kappa & Fleiss' Kappa)
+
+To measure the reliability and agreement between multiple annotators (e.g. 3 annotators on a sample subset of 600 comments), run:
+
+```powershell
+python -m src.inter_annotator_agreement --input data/processed/manual_label.csv --by-game
+```
+
+This calculates:
+- **Pairwise Cohen's Kappa** using `scikit-learn` across all pairs of annotators.
+- **Fleiss' Kappa** across all annotators simultaneously using `statsmodels`.
+- **Agreement rate** between VADER suggestions and final consensus manual labels (Rumusan Masalah #4).
+- Automatic benchmark interpretation based on **Landis & Koch (1977)**:
+  - `< 0.00` : Poor (worse than chance)
+  - `0.00 – 0.20` : Slight
+  - `0.21 – 0.40` : Fair
+  - `0.41 – 0.60` : Moderate
+  - `0.61 – 0.80` : Substantial
+  - `0.81 – 1.00` : Almost Perfect
+
+### Annotator agreement on 600 sample comments:
+
+| Metric | Overall | CS2 (N=300) | VALORANT (N=300) |
+|---|---|---|---|
+| **Mean Cohen's Kappa** | 0.4098 (Moderate) | 0.3715 (Fair) | 0.4431 (Moderate) |
+| **Fleiss' Kappa** | 0.4067 (Moderate) | 0.3693 (Fair) | 0.4381 (Moderate) |
+
+Pairwise Cohen's Kappa breakdown:
+- Annotator 1 vs. Annotator 2: **0.5483** (Moderate)
+- Annotator 1 vs. Annotator 3: **0.3119** (Fair)
+- Annotator 2 vs. Annotator 3: **0.3692** (Fair)
+
+## 3. Labeled CSV format
 
 Required columns for analysis:
 
@@ -78,7 +112,7 @@ Required columns for analysis:
 
 Other columns may be retained. If a `review_status` column is present, analysis will reject rows still marked `needs_review`. Both games must be present, and each sentiment class needs at least two examples per game. A larger sample may be needed for an 80:20 stratified split so every class appears in both training and test sets.
 
-## 3. Training and evaluation
+## 4. Training and evaluation
 
 Run the analysis with an 80% training and 20% test stratified split:
 
@@ -160,12 +194,6 @@ Three model snapshots are committed under `data/processed/`. All runs use TF-IDF
 ---
 
 The baseline model has limited performance across all runs, especially on negative and neutral classes. See the confusion matrices and per-class metrics in the corresponding `model_metrics.json` files; do not rely on accuracy alone. Results reflect the dataset labels used at the time of analysis and do not automatically represent independent human annotations.
-
-## Run the tests
-
-```powershell
-python -m unittest discover -s tests -v
-```
 
 ## Research limitations
 

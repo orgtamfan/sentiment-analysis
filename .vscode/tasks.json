@@ -82,6 +82,20 @@
 			],
 			"isBackground": false,
 			"problemMatcher": []
+		},
+		{
+			"label": "Calculate inter-annotator agreement (Cohen and Fleiss Kappa)",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"-m",
+				"src.inter_annotator_agreement",
+				"--input",
+				"data/processed/manual_label.csv",
+				"--by-game"
+			],
+			"isBackground": false,
+			"problemMatcher": []
 		}
 	]
 }
