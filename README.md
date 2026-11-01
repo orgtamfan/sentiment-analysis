@@ -8,14 +8,14 @@ This project uses Reddit comments as the unit of analysis. VADER generates **ini
 
 ```text
 data/
-  raw/                                        # gitignored — raw scrape output (JSON)
+  raw/                                       
   processed/
-    reddit_comments_label_review.csv          # gitignored — VADER suggestions pending review
-    reddit_comments_labeled.csv               # gitignored — final labeled dataset (full)
-    reddit_comments_labeled_analysis/         # committed — report snapshot: full 5 000/game run
-    vader_subset_600_for_repo/                # committed — report snapshot: 300/game VADER-labeled subset
-    manual_labeled_for_repo/                  # committed — report snapshot: 300/game manually labeled subset
-reports/                                      # gitignored — regenerated on each local run
+    reddit_comments_label_review.csv         
+    reddit_comments_labeled.csv               
+    reddit_comments_labeled_analysis/         
+    vader_subset_600_for_repo/                
+    manual_labeled_for_repo/                  
+reports/                                      
 src/
   prepare_labels.py     # Generate VADER label suggestions for review
   sentiment_analysis.py # Train and evaluate a Naive Bayes model per game
