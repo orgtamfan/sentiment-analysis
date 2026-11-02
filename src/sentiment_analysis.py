@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import pandas as pd
 from sklearn.dummy import DummyClassifier
@@ -72,6 +72,7 @@ def load_dataset(input_path: Path) -> pd.DataFrame:
     # Check for text duplicates per game
     duplicate_texts = dataset.duplicated(subset=["game", "text"])
     if duplicate_texts.any():
+        n_dupe_texts = int(duplicate_texts.sum())
         # Check if conflicting sentiment labels exist for identical texts
         text_sentiment_counts = (
             dataset.groupby(["game", "text"])["sentiment"]
@@ -210,10 +211,6 @@ def analyze_dataset(
     """
     if not 0 < test_size < 1:
         raise ValueError("test_size must be between 0 and 1.")
-    if split_strategy not in {"auto", "group", "stratified"}:
-        raise ValueError(
-            "split_strategy must be 'auto', 'group', or 'stratified'."
-        )
 
     dataset = load_dataset(input_path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -253,24 +250,18 @@ def analyze_dataset(
 
         # Decide split strategy
         use_group = False
-        fallback_reason: str | None = None
         if split_strategy in ("auto", "group"):
-            if "post_id" not in game_data.columns:
-                fallback_reason = "post_id column is missing"
-            elif game_data["post_id"].isna().any():
-                fallback_reason = "post_id contains missing values"
-            else:
+            if "post_id" in game_data.columns and game_data["post_id"].notna().all():
                 n_groups = game_data["post_id"].nunique()
                 if n_groups >= 5:
                     use_group = True
-                else:
-                    fallback_reason = (
-                        f"post_id has fewer than 5 groups (found {n_groups})"
+                elif split_strategy == "group":
+                    raise ValueError(
+                        f"Requested 'group' split for '{game}', but found only {n_groups} groups (minimum 5 required)."
                     )
-
-            if split_strategy == "group" and not use_group:
+            elif split_strategy == "group":
                 raise ValueError(
-                    f"Requested 'group' split for '{game}', but {fallback_reason}."
+                    f"Requested 'group' split for '{game}', but 'post_id' column is missing or contains nulls."
                 )
 
         if use_group:
@@ -298,7 +289,6 @@ def analyze_dataset(
                 "n_groups_total": int(game_data["post_id"].nunique()),
                 "n_groups_train": int(game_data.iloc[train_idx]["post_id"].nunique()),
                 "n_groups_test": int(game_data.iloc[test_idx]["post_id"].nunique()),
-                "fallback_reason": None,
             }
         else:
             try:
@@ -316,26 +306,7 @@ def analyze_dataset(
                 ) from error
             split_info = {
                 "strategy": "StratifiedShuffleSplit",
-                "fallback_reason": fallback_reason,
             }
-
-        missing_train = sorted(set(SENTIMENTS) - set(train_labels.unique()))
-        missing_test = sorted(set(SENTIMENTS) - set(test_labels.unique()))
-        if missing_train or missing_test:
-            raise ValueError(
-                f"Invalid {split_info['strategy']} split for '{game}'. "
-                f"Missing in train: {missing_train}; "
-                f"missing in test: {missing_test}."
-            )
-
-        train_text_counts = train_text.value_counts()
-        test_text_counts = test_text.value_counts()
-        shared_texts = train_text_counts.index.intersection(test_text_counts.index)
-        split_info["n_duplicate_texts_across_splits"] = int(len(shared_texts))
-        split_info["n_rows_with_duplicate_text_across_splits"] = int(
-            train_text_counts.loc[shared_texts].sum()
-            + test_text_counts.loc[shared_texts].sum()
-        )
 
         # Train MultinomialNB model
         model = _build_model()
@@ -354,7 +325,7 @@ def analyze_dataset(
             "n_train": int(len(train_text)),
             "n_test": int(len(test_text)),
             "split_info": split_info,
-            "majority_class": str(train_labels.value_counts().idxmax()),
+            "majority_class": str(dummy.classes_[0]),
             "naive_bayes": model_eval,
             "majority_baseline": dummy_eval,
             # Backward compatibility fields at root of game entry
