@@ -23,7 +23,7 @@ from sklearn.metrics import (
     confusion_matrix,
     f1_score,
 )
-from sklearn.model_selection import StratifiedGroupKFold, train_test_split
+from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
 
@@ -262,6 +262,15 @@ def analyze_dataset(
 
     metrics: dict[str, Any] = {
         "model": "TfidfVectorizer(1, 2) + MultinomialNB",
+        "model_config": {
+            "version": "tfidf_nb_v1",
+            "vectorizer": {
+                "lowercase": True,
+                "strip_accents": "unicode",
+                "ngram_range": [1, 2],
+            },
+            "classifier": "MultinomialNB",
+        },
         "baseline_model": "DummyClassifier(strategy='most_frequent')",
         "test_size": test_size,
         "random_state": random_state,
@@ -306,6 +315,10 @@ def analyze_dataset(
             # Build leak-free super-groups combining post_id and shared text
             clusters = _build_leak_free_groups(game_data, group_col="post_id", text_col="text")
             n_clusters = clusters.nunique()
+            if n_clusters < 2:
+                raise ValueError(
+                    f"Not enough independent clusters for group split: {n_clusters}"
+                )
             min_class_count = int(class_counts.min())
             n_splits = int(round(1.0 / test_size)) if test_size > 0 else 5
             n_splits = min(n_splits, n_clusters, min_class_count)
@@ -350,55 +363,42 @@ def analyze_dataset(
                 "n_groups_test": int(len(post_test)),
             }
         else:
-            duplicate_texts_exist = game_data["text"].duplicated(keep=False).any()
-            if duplicate_texts_exist:
-                # Even without post IDs, keep identical texts on one side of the split.
-                rows = game_data.assign(_row_group=range(len(game_data)))
-                text_groups = _build_leak_free_groups(
-                    rows, group_col="_row_group", text_col="text"
+            # Group by text even when there are no duplicates today, so this
+            # fallback cannot silently become leaky when duplicate rows appear.
+            rows = game_data.assign(_row_group=range(len(game_data)))
+            text_groups = _build_leak_free_groups(
+                rows, group_col="_row_group", text_col="text"
+            )
+            n_text_groups = int(text_groups.nunique())
+            if n_text_groups < 2:
+                raise ValueError(
+                    f"Not enough independent text clusters for split: {n_text_groups}"
                 )
-                n_splits = min(
-                    max(2, int(round(1.0 / test_size))),
-                    int(text_groups.nunique()),
+            n_splits = max(
+                2,
+                min(
+                    int(round(1.0 / test_size)),
+                    n_text_groups,
                     int(class_counts.min()),
+                ),
+            )
+            splitter = StratifiedGroupKFold(
+                n_splits=n_splits, shuffle=True, random_state=random_state
+            )
+            train_idx, test_idx = next(
+                splitter.split(
+                    game_data["text"], game_data["sentiment"], groups=text_groups
                 )
-                if n_splits < 2:
-                    raise ValueError(
-                        f"Could not create a text-group split for '{game}'. "
-                        "Add more distinct examples or adjust test_size."
-                    )
-                splitter = StratifiedGroupKFold(
-                    n_splits=n_splits, shuffle=True, random_state=random_state
-                )
-                train_idx, test_idx = next(
-                    splitter.split(
-                        game_data["text"], game_data["sentiment"], groups=text_groups
-                    )
-                )
-                train_text = game_data.iloc[train_idx]["text"]
-                train_labels = game_data.iloc[train_idx]["sentiment"]
-                test_text = game_data.iloc[test_idx]["text"]
-                test_labels = game_data.iloc[test_idx]["sentiment"]
-                split_info = {
-                    "strategy": "StratifiedGroupKFold",
-                    "grouping": "identical_text_only",
-                    "n_text_groups": int(text_groups.nunique()),
-                }
-            else:
-                try:
-                    train_text, test_text, train_labels, test_labels = train_test_split(
-                        game_data["text"],
-                        game_data["sentiment"],
-                        test_size=test_size,
-                        random_state=random_state,
-                        stratify=game_data["sentiment"],
-                    )
-                except ValueError as error:
-                    raise ValueError(
-                        f"Could not create a stratified split for '{game}'. "
-                        "Add more labeled examples or adjust test_size."
-                    ) from error
-                split_info = {"strategy": "StratifiedShuffleSplit"}
+            )
+            train_text = game_data.iloc[train_idx]["text"]
+            train_labels = game_data.iloc[train_idx]["sentiment"]
+            test_text = game_data.iloc[test_idx]["text"]
+            test_labels = game_data.iloc[test_idx]["sentiment"]
+            split_info = {
+                "strategy": "StratifiedGroupKFold",
+                "grouping": "identical_text_only",
+                "n_text_groups": n_text_groups,
+            }
             if fallback_reason:
                 split_info["fallback_reason"] = fallback_reason
 
@@ -411,6 +411,13 @@ def analyze_dataset(
                 f"Missing train classes: {sorted(missing_train) if missing_train else 'none'}; "
                 f"missing test classes: {sorted(missing_test) if missing_test else 'none'}."
             )
+
+        split_info["train_class_counts"] = {
+            label: int(train_labels.value_counts().get(label, 0)) for label in SENTIMENTS
+        }
+        split_info["test_class_counts"] = {
+            label: int(test_labels.value_counts().get(label, 0)) for label in SENTIMENTS
+        }
 
         # Train MultinomialNB model
         model = _build_model()

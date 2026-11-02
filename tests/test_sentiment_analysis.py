@@ -215,8 +215,13 @@ class SentimentAnalysisTests(unittest.TestCase):
             metrics = analyze_dataset(input_path, output_dir, split_strategy="auto")
             for game in ("cs2", "valorant"):
                 info = metrics["games"][game]["split_info"]
-                self.assertEqual(info["strategy"], "StratifiedShuffleSplit")
+                self.assertEqual(info["strategy"], "StratifiedGroupKFold")
                 self.assertEqual(info["fallback_reason"], "missing 'post_id' column")
+                self.assertEqual(sum(info["train_class_counts"].values()), metrics["games"][game]["n_train"])
+                self.assertEqual(sum(info["test_class_counts"].values()), metrics["games"][game]["n_test"])
+                self.assertIn("n_text_groups", info)
+            self.assertEqual(metrics["random_state"], 42)
+            self.assertEqual(metrics["model_config"]["version"], "tfidf_nb_v1")
 
     def test_direct_call_rejects_unknown_split_strategy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

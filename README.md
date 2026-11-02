@@ -138,6 +138,8 @@ python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.
 - **Leak-free group splitting (`StratifiedGroupKFold` + text-clustering):** When `post_id` is present, comments from the same Reddit thread are kept together. Furthermore, identical comments appearing across multiple posts are clustered into the same group via disjoint-set union, strictly guaranteeing zero text overlap and zero post overlap between train and test sets.
 - **Split integrity validation:** After splitting, the pipeline explicitly asserts that all 3 sentiment classes exist in both training and test sets, and verifies zero post_id and text intersections.
 - **Auditable fallback reporting:** If group splitting cannot be used (e.g., missing or insufficient `post_id`), `split_info` records an explicit `fallback_reason` (e.g., `"missing 'post_id' column"`).
+- **Leak-free text fallback:** Without usable post IDs, identical texts are assigned to the same `StratifiedGroupKFold` cluster. The analysis stops if there are too few independent clusters or if any class is absent from train or test.
+- **Reproducibility metadata:** `model_metrics.json` records the split strategy, group/cluster counts, train/test sizes and class counts, test fraction, random seed, and versioned model configuration for each game.
 - **Majority-class baseline (`DummyClassifier`):** A dummy classifier predicting the most frequent class is trained alongside MultinomialNB as an honest reference point.
 - **Macro F1 prioritization:** Because sentiment classes can be imbalanced, Macro F1 is treated as the primary metric, supported by per-class Precision, Recall, and Confusion Matrices.
 
