@@ -82,7 +82,7 @@ class TestInterAnnotatorAgreement(unittest.TestCase):
         })
         res = compute_fleiss_kappa(df, ["a1", "a2", "a3"])
         self.assertEqual(res["n_subjects"], 0)
-        self.assertTrue(np.isnan(res["kappa"]))
+        self.assertIsNone(res["kappa"])
 
     def test_vader_vs_consensus_agreement(self):
         df = pd.DataFrame({

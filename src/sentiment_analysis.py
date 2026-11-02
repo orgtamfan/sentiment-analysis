@@ -33,6 +33,40 @@ REQUIRED_COLUMNS = {"game", "text", "sentiment"}
 VALID_REVIEW_STATUSES = {"reviewed", "vader_auto"}
 
 
+def _build_leak_free_groups(
+    df: pd.DataFrame, group_col: str = "post_id", text_col: str = "text"
+) -> pd.Series:
+    """Cluster items so that no post_id and no identical text is split across clusters.
+
+    Uses disjoint-set (union-find) to merge posts that share identical comment text.
+    """
+    parent: dict[Any, Any] = {}
+
+    def find(i: Any) -> Any:
+        if parent[i] != i:
+            parent[i] = find(parent[i])
+        return parent[i]
+
+    def union(i: Any, j: Any) -> None:
+        root_i, root_j = find(i), find(j)
+        if root_i != root_j:
+            parent[root_i] = root_j
+
+    posts = df[group_col].unique()
+    texts = df[text_col].unique()
+    for p in posts:
+        parent[("p", p)] = ("p", p)
+    for t in texts:
+        parent[("t", t)] = ("t", t)
+
+    for p, t in zip(df[group_col], df[text_col]):
+        union(("p", p), ("t", t))
+
+    group_ids = {p: find(("p", p)) for p in posts}
+    cluster_map = {root: idx for idx, root in enumerate(set(group_ids.values()))}
+    return df[group_col].map(lambda p: cluster_map[group_ids[p]])
+
+
 def load_dataset(input_path: Path) -> pd.DataFrame:
     """Read and validate the annotated CSV dataset."""
     if not input_path.is_file():
@@ -250,25 +284,29 @@ def analyze_dataset(
 
         # Decide split strategy
         use_group = False
+        fallback_reason = None
         if split_strategy in ("auto", "group"):
-            if "post_id" in game_data.columns and game_data["post_id"].notna().all():
-                n_groups = game_data["post_id"].nunique()
-                if n_groups >= 5:
-                    use_group = True
-                elif split_strategy == "group":
-                    raise ValueError(
-                        f"Requested 'group' split for '{game}', but found only {n_groups} groups (minimum 5 required)."
-                    )
-            elif split_strategy == "group":
+            if "post_id" not in game_data.columns:
+                fallback_reason = "missing 'post_id' column"
+            elif game_data["post_id"].isna().any():
+                fallback_reason = "'post_id' contains missing values"
+            elif game_data["post_id"].nunique() < 5:
+                fallback_reason = f"only {game_data['post_id'].nunique()} distinct post_ids (minimum 5 required)"
+            else:
+                use_group = True
+
+            if split_strategy == "group" and not use_group:
                 raise ValueError(
-                    f"Requested 'group' split for '{game}', but 'post_id' column is missing or contains nulls."
+                    f"Requested 'group' split for '{game}', but cannot perform group splitting: {fallback_reason}."
                 )
 
         if use_group:
-            # StratifiedGroupKFold splits groups (posts) across folds while balancing classes
+            # Build leak-free super-groups combining post_id and shared text
+            clusters = _build_leak_free_groups(game_data, group_col="post_id", text_col="text")
+            n_clusters = clusters.nunique()
             min_class_count = int(class_counts.min())
             n_splits = int(round(1.0 / test_size)) if test_size > 0 else 5
-            n_splits = min(n_splits, game_data["post_id"].nunique(), min_class_count)
+            n_splits = min(n_splits, n_clusters, min_class_count)
             n_splits = max(2, n_splits)
             sgkf = StratifiedGroupKFold(
                 n_splits=n_splits, shuffle=True, random_state=random_state
@@ -277,18 +315,37 @@ def analyze_dataset(
                 sgkf.split(
                     game_data["text"],
                     game_data["sentiment"],
-                    groups=game_data["post_id"],
+                    groups=clusters,
                 )
             )
             train_text = game_data.iloc[train_idx]["text"]
             train_labels = game_data.iloc[train_idx]["sentiment"]
             test_text = game_data.iloc[test_idx]["text"]
             test_labels = game_data.iloc[test_idx]["sentiment"]
+
+            # Validate split integrity: post_id and text disjointness
+            post_train = set(game_data.iloc[train_idx]["post_id"])
+            post_test = set(game_data.iloc[test_idx]["post_id"])
+            post_intersection = post_train.intersection(post_test)
+            if post_intersection:
+                raise ValueError(
+                    f"Group split leak detected for '{game}': {len(post_intersection)} post_ids appear in both train and test."
+                )
+
+            text_train = set(train_text)
+            text_test = set(test_text)
+            text_intersection = text_train.intersection(text_test)
+            if text_intersection:
+                raise ValueError(
+                    f"Text duplicate leak detected for '{game}': {len(text_intersection)} identical text(s) appear in both train and test."
+                )
+
             split_info = {
                 "strategy": "StratifiedGroupKFold",
                 "n_groups_total": int(game_data["post_id"].nunique()),
-                "n_groups_train": int(game_data.iloc[train_idx]["post_id"].nunique()),
-                "n_groups_test": int(game_data.iloc[test_idx]["post_id"].nunique()),
+                "n_clusters": int(n_clusters),
+                "n_groups_train": int(len(post_train)),
+                "n_groups_test": int(len(post_test)),
             }
         else:
             try:
@@ -307,6 +364,18 @@ def analyze_dataset(
             split_info = {
                 "strategy": "StratifiedShuffleSplit",
             }
+            if fallback_reason:
+                split_info["fallback_reason"] = fallback_reason
+
+        # Post-split class distribution validation
+        missing_train = set(SENTIMENTS) - set(train_labels.unique())
+        missing_test = set(SENTIMENTS) - set(test_labels.unique())
+        if missing_train or missing_test:
+            raise ValueError(
+                f"Invalid split for '{game}'. "
+                f"Missing train classes: {sorted(missing_train) if missing_train else 'none'}; "
+                f"missing test classes: {sorted(missing_test) if missing_test else 'none'}."
+            )
 
         # Train MultinomialNB model
         model = _build_model()

@@ -167,6 +167,57 @@ class SentimentAnalysisTests(unittest.TestCase):
                 "StratifiedGroupKFold",
             )
 
+    def test_group_split_prevents_text_and_post_leak(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            input_path = root / "leak_test.csv"
+            output_dir = root / "reports"
+
+            records = []
+            for game in ("cs2", "valorant"):
+                for i in range(8):
+                    post_id = f"thread_{game}_{i}"
+                    # Identical text in post 0 and post 1 with SAME sentiment ("positive")
+                    t = "great clutch" if i in (0, 1) else f"comment text {i}"
+                    s = "positive" if i in (0, 1) else ("negative" if i % 2 == 1 else "neutral")
+                    records.append({
+                        "game": game,
+                        "text": t,
+                        "sentiment": s,
+                        "comment_id": f"c_{game}_{i}_a",
+                        "post_id": post_id,
+                    })
+                    records.append({
+                        "game": game,
+                        "text": f"distinct comment {i}",
+                        "sentiment": "neutral" if i % 2 == 0 else "positive",
+                        "comment_id": f"c_{game}_{i}_b",
+                        "post_id": post_id,
+                    })
+
+            df = pd.DataFrame(records)
+            df.to_csv(input_path, index=False)
+
+            metrics = analyze_dataset(input_path, output_dir, split_strategy="group")
+            # Verify no leaks and split_info fields
+            for game in ("cs2", "valorant"):
+                self.assertIn("n_clusters", metrics["games"][game]["split_info"])
+
+    def test_fallback_reason_recorded_when_post_id_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            input_path = root / "fallback_test.csv"
+            output_dir = root / "reports"
+
+            df = self._dataset().drop(columns=["post_id"])
+            df.to_csv(input_path, index=False)
+
+            metrics = analyze_dataset(input_path, output_dir, split_strategy="auto")
+            for game in ("cs2", "valorant"):
+                info = metrics["games"][game]["split_info"]
+                self.assertEqual(info["strategy"], "StratifiedShuffleSplit")
+                self.assertEqual(info["fallback_reason"], "missing 'post_id' column")
+
 
 if __name__ == "__main__":
     unittest.main()

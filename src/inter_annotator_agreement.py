@@ -133,18 +133,24 @@ def compute_pairwise_cohen_kappas(
         else:
             score = compute_cohens_kappa(r1, r2, labels=labels)
         pair_key = f"{col1}_vs_{col2}"
+        kappa_val = round(score, 4) if np.isfinite(score) else None
         results["pairs"][pair_key] = {
             "rater1": col1,
             "rater2": col2,
             "n_samples": int(valid_mask.sum()),
-            "kappa": round(score, 4),
+            "kappa": kappa_val,
             "interpretation": interpret_kappa(score),
         }
-        scores.append(score)
+        if np.isfinite(score):
+            scores.append(score)
 
     if scores:
-        results["mean_cohens_kappa"] = round(float(np.mean(scores)), 4)
-        results["mean_interpretation"] = interpret_kappa(results["mean_cohens_kappa"])
+        mean_score = float(np.mean(scores))
+        results["mean_cohens_kappa"] = round(mean_score, 4)
+        results["mean_interpretation"] = interpret_kappa(mean_score)
+    else:
+        results["mean_cohens_kappa"] = None
+        results["mean_interpretation"] = "Undefined (no valid pair scores)"
 
     return results
 
@@ -173,7 +179,7 @@ def compute_fleiss_kappa(
     clean_df = normalized_df.dropna(subset=rater_columns).copy()
     if len(clean_df) == 0:
         return {
-            "kappa": float("nan"),
+            "kappa": None,
             "interpretation": "Undefined (no complete subjects)",
             "categories": sorted(list(VALID_CATEGORIES)),
             "n_subjects": 0,
@@ -184,8 +190,9 @@ def compute_fleiss_kappa(
     contingency_table, categories = aggregate_raters(labels_matrix)
     score = float(fleiss_kappa(contingency_table, method=method))
 
+    kappa_val = round(score, 4) if np.isfinite(score) else None
     return {
-        "kappa": round(score, 4),
+        "kappa": kappa_val,
         "interpretation": interpret_kappa(score),
         "categories": list(categories),
         "n_subjects": int(len(clean_df)),
@@ -258,12 +265,11 @@ def analyze_agreement(
     # 1. Pairwise Cohen: use full df (each pair drops only its own NaNs)
     pairwise = compute_pairwise_cohen_kappas(df, rater_columns=rater_columns)
 
-    # 2. Fleiss multi-rater: requires complete data across all raters
-    complete_df = df.dropna(subset=rater_columns).copy()
-    fleiss = compute_fleiss_kappa(complete_df, rater_columns=rater_columns)
+    # 2. Fleiss multi-rater: internally filters to rows with complete annotations across all raters
+    fleiss = compute_fleiss_kappa(df, rater_columns=rater_columns)
 
     report: dict[str, Any] = {
-        "n_subjects_complete": int(len(complete_df)),
+        "n_subjects_complete": fleiss["n_subjects"],
         "n_raters": len(rater_columns),
         "raters": list(rater_columns),
         "categories": fleiss["categories"],
@@ -394,18 +400,25 @@ def main() -> None:
 
     print("\n[1. Cohen's Kappa per Pasangan Annotator (scikit-learn)]")
     for pair_name, details in overall["cohens_kappa"]["pairs"].items():
+        k_str = f"{details['kappa']:.4f}" if details['kappa'] is not None else "null"
         print(
             f"  {details['rater1']} vs {details['rater2']}: "
-            f"kappa = {details['kappa']:.4f} ({details['interpretation']}) [N={details['n_samples']}]"
+            f"kappa = {k_str} ({details['interpretation']}) [N={details['n_samples']}]"
         )
+    mean_k_str = (
+        f"{overall['cohens_kappa']['mean_cohens_kappa']:.4f}"
+        if overall['cohens_kappa']['mean_cohens_kappa'] is not None
+        else "null"
+    )
     print(
-        f"  Mean Cohen's Kappa: {overall['cohens_kappa']['mean_cohens_kappa']:.4f} "
+        f"  Mean Cohen's Kappa: {mean_k_str} "
         f"({overall['cohens_kappa']['mean_interpretation']})"
     )
 
     print("\n[2. Fleiss' Kappa Semua Annotator Sekaligus (statsmodels)]")
     f_res = overall["fleiss_kappa"]
-    print(f"  Fleiss' Kappa: {f_res['kappa']:.4f} ({f_res['interpretation']})")
+    f_k_str = f"{f_res['kappa']:.4f}" if f_res['kappa'] is not None else "null"
+    print(f"  Fleiss' Kappa: {f_k_str} ({f_res['interpretation']})")
 
     if "vader_vs_consensus" in overall:
         v_res = overall["vader_vs_consensus"]
@@ -427,17 +440,25 @@ def main() -> None:
 
             print(f"\n--- Game: {game_val} (Complete N = {game_analysis['n_subjects_complete']}) ---")
             for pair_name, details in game_analysis["cohens_kappa"]["pairs"].items():
+                k_str = f"{details['kappa']:.4f}" if details['kappa'] is not None else "null"
                 print(
                     f"  Cohen {details['rater1']} vs {details['rater2']}: "
-                    f"{details['kappa']:.4f} ({details['interpretation']}) [N={details['n_samples']}]"
+                    f"{k_str} ({details['interpretation']}) [N={details['n_samples']}]"
                 )
-            print(
-                f"  Mean Cohen: {game_analysis['cohens_kappa']['mean_cohens_kappa']:.4f} "
-                f"({game_analysis['cohens_kappa']['mean_interpretation']})"
+            mean_g_str = (
+                f"{game_analysis['cohens_kappa']['mean_cohens_kappa']:.4f}"
+                if game_analysis['cohens_kappa']['mean_cohens_kappa'] is not None
+                else "null"
             )
             print(
-                f"  Fleiss    : {game_analysis['fleiss_kappa']['kappa']:.4f} "
-                f"({game_analysis['fleiss_kappa']['interpretation']})"
+                f"  Mean Cohen: {mean_g_str} "
+                f"({game_analysis['cohens_kappa']['mean_interpretation']})"
+            )
+            fg = game_analysis['fleiss_kappa']
+            fg_k_str = f"{fg['kappa']:.4f}" if fg['kappa'] is not None else "null"
+            print(
+                f"  Fleiss    : {fg_k_str} "
+                f"({fg['interpretation']})"
             )
             if "vader_vs_consensus" in game_analysis:
                 vg = game_analysis["vader_vs_consensus"]
