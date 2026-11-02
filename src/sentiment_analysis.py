@@ -1,4 +1,11 @@
-"""TF-IDF and Multinomial Naive Bayes baseline for labeled Reddit data."""
+"""TF-IDF and Multinomial Naive Bayes baseline for labeled Reddit data.
+
+Includes support for:
+- Standard stratified train/test split or group-aware StratifiedGroupKFold split by `post_id`
+- Majority-class baseline (DummyClassifier) alongside MultinomialNB
+- Strict validation of `review_status`
+- Comprehensive evaluation focusing on Macro F1, weighted F1, per-class metrics, and confusion matrix
+"""
 
 from __future__ import annotations
 
@@ -8,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from sklearn.dummy import DummyClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import (
     accuracy_score,
@@ -15,13 +23,14 @@ from sklearn.metrics import (
     confusion_matrix,
     f1_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedGroupKFold, train_test_split
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
 
 GAMES = ("cs2", "valorant")
 SENTIMENTS = ("negative", "neutral", "positive")
 REQUIRED_COLUMNS = {"game", "text", "sentiment"}
+VALID_REVIEW_STATUSES = {"reviewed", "vader_auto"}
 
 
 def load_dataset(input_path: Path) -> pd.DataFrame:
@@ -30,6 +39,9 @@ def load_dataset(input_path: Path) -> pd.DataFrame:
         raise FileNotFoundError(f"Dataset not found: {input_path}")
 
     dataset = pd.read_csv(input_path)
+    if "sentiment" not in dataset.columns and "sentiment_final" in dataset.columns:
+        dataset = dataset.rename(columns={"sentiment_final": "sentiment"})
+
     missing_columns = REQUIRED_COLUMNS - set(dataset.columns)
     if missing_columns:
         raise ValueError(
@@ -48,14 +60,56 @@ def load_dataset(input_path: Path) -> pd.DataFrame:
         raise ValueError("Required columns cannot contain empty values.")
     if dataset["text"].eq("").any():
         raise ValueError("Text entries cannot be empty.")
-    if "review_status" in dataset.columns:
-        pending_review = dataset["review_status"].astype("string").str.strip().eq(
-            "needs_review"
+
+    # Integrity checks: check duplicate comment_id and report/validate exact text duplicates
+    if "comment_id" in dataset.columns:
+        duplicate_ids = dataset["comment_id"].duplicated()
+        if duplicate_ids.any():
+            raise ValueError(
+                f"Found {duplicate_ids.sum()} duplicate comment IDs in dataset."
+            )
+
+    # Check for text duplicates per game
+    duplicate_texts = dataset.duplicated(subset=["game", "text"])
+    if duplicate_texts.any():
+        n_dupe_texts = int(duplicate_texts.sum())
+        # Check if conflicting sentiment labels exist for identical texts
+        text_sentiment_counts = (
+            dataset.groupby(["game", "text"])["sentiment"]
+            .nunique()
         )
-        if pending_review.any():
+        conflicts = text_sentiment_counts[text_sentiment_counts > 1]
+        if not conflicts.empty:
+            raise ValueError(
+                f"Found {len(conflicts)} duplicate text(s) with conflicting sentiment labels."
+            )
+
+    # Strict validation of review_status: must be explicitly valid, not just non-'needs_review'
+    if "review_status" in dataset.columns:
+        status_series = (
+            dataset["review_status"].astype("string").str.strip().str.lower()
+        )
+        if status_series.eq("needs_review").any():
             raise ValueError(
                 "Dataset contains comments marked needs_review. "
                 "Review the VADER suggestions and update review_status before analysis."
+            )
+        invalid_mask = status_series.isna() | ~status_series.isin(
+            VALID_REVIEW_STATUSES
+        )
+        if invalid_mask.any():
+            invalid_vals = sorted(
+                set(dataset.loc[invalid_mask, "review_status"].dropna().astype(str))
+            )
+            has_nan = dataset.loc[invalid_mask, "review_status"].isna().any()
+            err_parts = []
+            if invalid_vals:
+                err_parts.append(f"unrecognized status(es): {invalid_vals}")
+            if has_nan:
+                err_parts.append("missing/empty status values")
+            raise ValueError(
+                f"Dataset contains invalid review_status ({', '.join(err_parts)}). "
+                f"Allowed statuses: {sorted(VALID_REVIEW_STATUSES)}."
             )
 
     unknown_games = sorted(set(dataset["game"].dropna()) - set(GAMES))
@@ -99,13 +153,62 @@ def _build_model() -> Pipeline:
     )
 
 
+def _evaluate_predictions(
+    test_labels: Sequence[str], predictions: Sequence[str]
+) -> dict[str, Any]:
+    """Calculate standard evaluation metrics with Macro F1 prioritized."""
+    return {
+        "accuracy": float(accuracy_score(test_labels, predictions)),
+        "macro_f1": float(
+            f1_score(
+                test_labels,
+                predictions,
+                labels=list(SENTIMENTS),
+                average="macro",
+                zero_division=0,
+            )
+        ),
+        "weighted_f1": float(
+            f1_score(
+                test_labels,
+                predictions,
+                labels=list(SENTIMENTS),
+                average="weighted",
+                zero_division=0,
+            )
+        ),
+        "classification_report": classification_report(
+            test_labels,
+            predictions,
+            labels=list(SENTIMENTS),
+            output_dict=True,
+            zero_division=0,
+        ),
+        "confusion_matrix": confusion_matrix(
+            test_labels,
+            predictions,
+            labels=list(SENTIMENTS),
+        ).tolist(),
+    }
+
+
 def analyze_dataset(
     input_path: Path,
     output_dir: Path,
     test_size: float = 0.2,
     random_state: int = 42,
+    split_strategy: str = "auto",
 ) -> dict[str, Any]:
-    """Evaluate one model per game and write label distribution and metrics."""
+    """Evaluate one model per game and write label distribution and metrics.
+
+    Args:
+        input_path: CSV dataset path.
+        output_dir: Destination folder for output reports.
+        test_size: Approximate test fraction (default: 0.2).
+        random_state: Seed for reproducibility.
+        split_strategy: 'auto', 'group', or 'stratified'. 'auto' uses group splitting
+            if 'post_id' exists with >= 5 groups, else stratified split.
+    """
     if not 0 < test_size < 1:
         raise ValueError("test_size must be between 0 and 1.")
 
@@ -123,6 +226,7 @@ def analyze_dataset(
 
     metrics: dict[str, Any] = {
         "model": "TfidfVectorizer(1, 2) + MultinomialNB",
+        "baseline_model": "DummyClassifier(strategy='most_frequent')",
         "test_size": test_size,
         "random_state": random_state,
         "sentiment_labels": list(SENTIMENTS),
@@ -130,7 +234,7 @@ def analyze_dataset(
     }
 
     for game in GAMES:
-        game_data = dataset.loc[dataset["game"] == game]
+        game_data = dataset.loc[dataset["game"] == game].copy()
         class_counts = game_data["sentiment"].value_counts().reindex(
             SENTIMENTS, fill_value=0
         )
@@ -144,59 +248,92 @@ def analyze_dataset(
                 + ", ".join(too_small)
             )
 
-        try:
-            train_text, test_text, train_labels, test_labels = train_test_split(
-                game_data["text"],
-                game_data["sentiment"],
-                test_size=test_size,
-                random_state=random_state,
-                stratify=game_data["sentiment"],
-            )
-        except ValueError as error:
-            raise ValueError(
-                f"Could not create a stratified split for '{game}'. "
-                "Add more labeled examples or adjust test_size."
-            ) from error
+        # Decide split strategy
+        use_group = False
+        if split_strategy in ("auto", "group"):
+            if "post_id" in game_data.columns and game_data["post_id"].notna().all():
+                n_groups = game_data["post_id"].nunique()
+                if n_groups >= 5:
+                    use_group = True
+                elif split_strategy == "group":
+                    raise ValueError(
+                        f"Requested 'group' split for '{game}', but found only {n_groups} groups (minimum 5 required)."
+                    )
+            elif split_strategy == "group":
+                raise ValueError(
+                    f"Requested 'group' split for '{game}', but 'post_id' column is missing or contains nulls."
+                )
 
+        if use_group:
+            # StratifiedGroupKFold splits groups (posts) across folds while balancing classes
+            min_class_count = int(class_counts.min())
+            n_splits = int(round(1.0 / test_size)) if test_size > 0 else 5
+            n_splits = min(n_splits, game_data["post_id"].nunique(), min_class_count)
+            n_splits = max(2, n_splits)
+            sgkf = StratifiedGroupKFold(
+                n_splits=n_splits, shuffle=True, random_state=random_state
+            )
+            train_idx, test_idx = next(
+                sgkf.split(
+                    game_data["text"],
+                    game_data["sentiment"],
+                    groups=game_data["post_id"],
+                )
+            )
+            train_text = game_data.iloc[train_idx]["text"]
+            train_labels = game_data.iloc[train_idx]["sentiment"]
+            test_text = game_data.iloc[test_idx]["text"]
+            test_labels = game_data.iloc[test_idx]["sentiment"]
+            split_info = {
+                "strategy": "StratifiedGroupKFold",
+                "n_groups_total": int(game_data["post_id"].nunique()),
+                "n_groups_train": int(game_data.iloc[train_idx]["post_id"].nunique()),
+                "n_groups_test": int(game_data.iloc[test_idx]["post_id"].nunique()),
+            }
+        else:
+            try:
+                train_text, test_text, train_labels, test_labels = train_test_split(
+                    game_data["text"],
+                    game_data["sentiment"],
+                    test_size=test_size,
+                    random_state=random_state,
+                    stratify=game_data["sentiment"],
+                )
+            except ValueError as error:
+                raise ValueError(
+                    f"Could not create a stratified split for '{game}'. "
+                    "Add more labeled examples or adjust test_size."
+                ) from error
+            split_info = {
+                "strategy": "StratifiedShuffleSplit",
+            }
+
+        # Train MultinomialNB model
         model = _build_model()
         model.fit(train_text, train_labels)
         predictions = model.predict(test_text)
+        model_eval = _evaluate_predictions(test_labels, predictions)
+
+        # Train majority-class baseline (DummyClassifier) for honest comparison
+        dummy = DummyClassifier(strategy="most_frequent")
+        dummy.fit(train_text, train_labels)
+        dummy_predictions = dummy.predict(test_text)
+        dummy_eval = _evaluate_predictions(test_labels, dummy_predictions)
 
         metrics["games"][game] = {
             "n_samples": int(len(game_data)),
             "n_train": int(len(train_text)),
             "n_test": int(len(test_text)),
-            "accuracy": float(accuracy_score(test_labels, predictions)),
-            "macro_f1": float(
-                f1_score(
-                    test_labels,
-                    predictions,
-                    labels=list(SENTIMENTS),
-                    average="macro",
-                    zero_division=0,
-                )
-            ),
-            "weighted_f1": float(
-                f1_score(
-                    test_labels,
-                    predictions,
-                    labels=list(SENTIMENTS),
-                    average="weighted",
-                    zero_division=0,
-                )
-            ),
-            "classification_report": classification_report(
-                test_labels,
-                predictions,
-                labels=list(SENTIMENTS),
-                output_dict=True,
-                zero_division=0,
-            ),
-            "confusion_matrix": confusion_matrix(
-                test_labels,
-                predictions,
-                labels=list(SENTIMENTS),
-            ).tolist(),
+            "split_info": split_info,
+            "majority_class": str(dummy.classes_[0]),
+            "naive_bayes": model_eval,
+            "majority_baseline": dummy_eval,
+            # Backward compatibility fields at root of game entry
+            "accuracy": model_eval["accuracy"],
+            "macro_f1": model_eval["macro_f1"],
+            "weighted_f1": model_eval["weighted_f1"],
+            "classification_report": model_eval["classification_report"],
+            "confusion_matrix": model_eval["confusion_matrix"],
         }
 
     counts.to_csv(output_dir / "sentiment_distribution.csv", index=False)
@@ -234,15 +371,45 @@ def main() -> None:
         default=42,
         help="Seed for reproducible train/test splits (default: 42).",
     )
+    parser.add_argument(
+        "--split-strategy",
+        type=str,
+        choices=["auto", "group", "stratified"],
+        default="auto",
+        help="Data split strategy: 'auto' (group split if post_id exists, else stratified), "
+        "'group' (enforce post_id StratifiedGroupKFold), or 'stratified' (standard stratified).",
+    )
     args = parser.parse_args()
 
-    analyze_dataset(
+    metrics = analyze_dataset(
         input_path=args.input,
         output_dir=args.output_dir,
         test_size=args.test_size,
         random_state=args.random_state,
+        split_strategy=args.split_strategy,
     )
-    print(f"Analysis complete. Reports saved to: {args.output_dir}")
+
+    print("=" * 65)
+    print("SENTIMENT ANALYSIS EVALUATION RESULTS")
+    print("=" * 65)
+    for game, res in metrics["games"].items():
+        print(f"\nGame: {game.upper()} (Split: {res['split_info']['strategy']}, N_test: {res['n_test']})")
+        nb = res["naive_bayes"]
+        base = res["majority_baseline"]
+        print(f"  [Multinomial Naive Bayes]")
+        print(f"    Macro F1    : {nb['macro_f1']:.4f}  (Baseline majority: {base['macro_f1']:.4f})")
+        print(f"    Weighted F1 : {nb['weighted_f1']:.4f}  (Baseline majority: {base['weighted_f1']:.4f})")
+        print(f"    Accuracy    : {nb['accuracy']:.4f}  (Baseline majority: {base['accuracy']:.4f})")
+        print("    Per-class metrics:")
+        for sentiment in SENTIMENTS:
+            rep = nb["classification_report"].get(sentiment, {})
+            print(
+                f"      {sentiment:8s} -> Precision: {rep.get('precision', 0.0):.3f}, "
+                f"Recall: {rep.get('recall', 0.0):.3f}, "
+                f"F1: {rep.get('f1-score', 0.0):.3f} (support: {int(rep.get('support', 0))})"
+            )
+    print("=" * 65)
+    print(f"Reports saved to: {args.output_dir}")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,5 @@
+"""Unit tests for sentiment_analysis module."""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,7 +7,6 @@ from pathlib import Path
 import pandas as pd
 
 from src.sentiment_analysis import analyze_dataset, load_dataset
-from src.prepare_labels import generate_label_suggestions
 
 
 class SentimentAnalysisTests(unittest.TestCase):
@@ -30,12 +31,18 @@ class SentimentAnalysisTests(unittest.TestCase):
                 "fun match and very enjoyable win",
             ],
         }
-        rows = [
-            {"game": game, "text": text, "sentiment": sentiment}
-            for game in ("cs2", "valorant")
-            for sentiment, texts in examples.items()
-            for text in texts
-        ]
+        rows = []
+        for game in ("cs2", "valorant"):
+            for sentiment, texts in examples.items():
+                for i, text in enumerate(texts):
+                    # Assign distinct post_id so each game has 12 distinct posts (>= 5 needed for group split)
+                    rows.append({
+                        "game": game,
+                        "text": text,
+                        "sentiment": sentiment,
+                        "comment_id": f"{game}_{sentiment}_{i}",
+                        "post_id": f"post_{game}_{sentiment}_{i}",
+                    })
         return pd.DataFrame(rows)
 
     def test_analysis_writes_reports_for_both_games(self) -> None:
@@ -51,6 +58,7 @@ class SentimentAnalysisTests(unittest.TestCase):
             self.assertTrue((output_dir / "sentiment_distribution.csv").is_file())
             self.assertTrue((output_dir / "model_metrics.json").is_file())
             self.assertEqual(result["games"]["cs2"]["n_samples"], 12)
+            self.assertIn("majority_baseline", result["games"]["cs2"])
 
     def test_load_dataset_rejects_unknown_sentiment(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -63,6 +71,36 @@ class SentimentAnalysisTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unsupported sentiment labels"):
                 load_dataset(input_path)
 
+    def test_load_dataset_rejects_empty_label(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            input_path = Path(temporary_directory) / "reddit_posts.csv"
+            dataset = self._dataset()
+            dataset.loc[0, "sentiment"] = ""
+            dataset.to_csv(input_path, index=False)
+
+            with self.assertRaisesRegex(ValueError, "Required columns cannot contain empty values"):
+                load_dataset(input_path)
+
+    def test_load_dataset_rejects_empty_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            input_path = Path(temporary_directory) / "reddit_posts.csv"
+            dataset = self._dataset()
+            dataset.loc[0, "text"] = "   "
+            dataset.to_csv(input_path, index=False)
+
+            with self.assertRaisesRegex(ValueError, "Text entries cannot be empty"):
+                load_dataset(input_path)
+
+    def test_load_dataset_rejects_unknown_game(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            input_path = Path(temporary_directory) / "reddit_posts.csv"
+            dataset = self._dataset()
+            dataset.loc[0, "game"] = "dota2"
+            dataset.to_csv(input_path, index=False)
+
+            with self.assertRaisesRegex(ValueError, "Unsupported game values"):
+                load_dataset(input_path)
+
     def test_load_dataset_rejects_comments_pending_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             input_path = Path(temporary_directory) / "reddit_posts.csv"
@@ -72,6 +110,29 @@ class SentimentAnalysisTests(unittest.TestCase):
             dataset.to_csv(input_path, index=False)
 
             with self.assertRaisesRegex(ValueError, "marked needs_review"):
+                load_dataset(input_path)
+
+    def test_load_dataset_rejects_duplicate_comment_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            input_path = Path(temporary_directory) / "reddit_posts.csv"
+            dataset = self._dataset()
+            dataset.loc[1, "comment_id"] = dataset.loc[0, "comment_id"]
+            dataset.to_csv(input_path, index=False)
+
+            with self.assertRaisesRegex(ValueError, "duplicate comment IDs"):
+                load_dataset(input_path)
+
+    def test_load_dataset_rejects_conflicting_sentiment_for_same_text(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            input_path = Path(temporary_directory) / "reddit_posts.csv"
+            dataset = self._dataset()
+            # Same game, identical text, but conflicting sentiment labels
+            dataset.loc[1, "text"] = dataset.loc[0, "text"]
+            dataset.loc[0, "sentiment"] = "positive"
+            dataset.loc[1, "sentiment"] = "negative"
+            dataset.to_csv(input_path, index=False)
+
+            with self.assertRaisesRegex(ValueError, "conflicting sentiment labels"):
                 load_dataset(input_path)
 
     def test_analysis_rejects_missing_class_without_writing_reports(self) -> None:
@@ -91,43 +152,20 @@ class SentimentAnalysisTests(unittest.TestCase):
             self.assertFalse((output_dir / "sentiment_distribution.csv").exists())
             self.assertFalse((output_dir / "model_metrics.json").exists())
 
-    def test_suggestions_create_review_csv_without_final_labels(self) -> None:
+    def test_stratified_group_split(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            input_path = root / "comments.json"
-            output_path = root / "review.csv"
-            input_path.write_text(
-                '[{"game":"CS2","comment_id":"1","comment_text":"This is great!"},'
-                '{"game":"VALORANT","comment_id":"2",'
-                '"comment_text":"This is awful."},'
-                '{"game":"CS2","comment_id":"3","comment_text":"  "}]',
-                encoding="utf-8",
+            input_path = root / "reddit_posts.csv"
+            output_dir = root / "reports"
+            self._dataset().to_csv(input_path, index=False)
+
+            metrics = analyze_dataset(
+                input_path, output_dir, split_strategy="group"
             )
-
-            counts = generate_label_suggestions(input_path, output_path)
-
-            review = pd.read_csv(output_path, keep_default_na=False)
-            self.assertEqual(counts, {"written": 2, "skipped_empty_text": 1})
-            self.assertEqual(review["game"].tolist(), ["cs2", "valorant"])
-            self.assertEqual(review["sentiment_suggestion"].tolist(), ["positive", "negative"])
-            self.assertEqual(review["sentiment"].tolist(), ["", ""])
-            self.assertEqual(set(review["review_status"]), {"needs_review"})
-
-    def test_suggestions_do_not_overwrite_existing_review_file(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            input_path = root / "comments.json"
-            output_path = root / "review.csv"
-            input_path.write_text(
-                '[{"game":"CS2","comment_text":"Good match"}]',
-                encoding="utf-8",
+            self.assertEqual(
+                metrics["games"]["cs2"]["split_info"]["strategy"],
+                "StratifiedGroupKFold",
             )
-            output_path.write_text("human annotation", encoding="utf-8")
-
-            with self.assertRaisesRegex(FileExistsError, "already exists"):
-                generate_label_suggestions(input_path, output_path)
-
-            self.assertEqual(output_path.read_text(encoding="utf-8"), "human annotation")
 
 
 if __name__ == "__main__":

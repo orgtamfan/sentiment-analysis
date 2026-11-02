@@ -7,10 +7,12 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Keep research data and generated reports local.
-data/raw/*
-!data/raw/.gitkeep
-data/processed/*
-!data/processed/.gitkeep
-reports/*
-!reports/.gitkeep
+# Large raw and fully-labeled datasets — do not commit
+data/raw/
+data/processed/reddit_comments_labeled.csv
+data/processed/reddit_comments_label_review.csv
+data/processed/manual_label.csv
+
+# Report snapshots in data/processed/*/ are committed (see data/README.md)
+# The top-level reports/ dir is local-only (regenerated on each run)
+reports/

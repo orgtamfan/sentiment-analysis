@@ -29,22 +29,7 @@
 			"problemMatcher": []
 		},
 		{
-			"label": "Analyze labeled Reddit comments",
-			"type": "shell",
-			"command": "${command:python.interpreterPath}",
-			"args": [
-				"-m",
-				"src.sentiment_analysis",
-				"--input",
-				"data/processed/reddit_comments_label_review.csv",
-				"--test-size",
-				"0.2"
-			],
-			"isBackground": false,
-			"problemMatcher": []
-		},
-		{
-			"label": "Analyze reviewed Reddit comments",
+			"label": "Analyze labeled Reddit comments (full dataset)",
 			"type": "shell",
 			"command": "${command:python.interpreterPath}",
 			"args": [
@@ -56,6 +41,58 @@
 				"0.2",
 				"--random-state",
 				"42"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Analyze labeled Reddit comments (save to processed snapshot)",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"-m",
+				"src.sentiment_analysis",
+				"--input",
+				"data/processed/reddit_comments_labeled.csv",
+				"--output-dir",
+				"data/processed/reddit_comments_labeled_analysis",
+				"--test-size",
+				"0.2",
+				"--random-state",
+				"42"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Analyze manually labeled repository subset",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"-m",
+				"src.sentiment_analysis",
+				"--input",
+				"data/processed/manual_labeled_for_repo/manual_labeled.csv",
+				"--output-dir",
+				"data/processed/manual_labeled_for_repo",
+				"--test-size",
+				"0.2",
+				"--random-state",
+				"42"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Calculate inter-annotator agreement (Cohen and Fleiss Kappa)",
+			"type": "shell",
+			"command": "${command:python.interpreterPath}",
+			"args": [
+				"-m",
+				"src.inter_annotator_agreement",
+				"--input",
+				"data/processed/manual_label.csv",
+				"--by-game"
 			],
 			"isBackground": false,
 			"problemMatcher": []
