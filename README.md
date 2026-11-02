@@ -19,9 +19,12 @@ data/
 reports/                                      # gitignored — regenerated on each local run
 src/
   prepare_labels.py             # Generate VADER label suggestions for review
-  sentiment_analysis.py         # Train and evaluate a Naive Bayes model per game
+  sentiment_analysis.py         # Train and evaluate Naive Bayes & majority baseline models
   inter_annotator_agreement.py  # Cohen's Kappa, Fleiss' Kappa, and VADER agreement rate
-tests/                          # Automated unit tests
+tests/
+  test_prepare_labels.py             # Tests for label suggestion pipeline & JSON parsing
+  test_sentiment_analysis.py         # Tests for dataset validation, duplicates, and split logic
+  test_inter_annotator_agreement.py  # Tests for Kappa calculations, normalization, and metrics
 README.md
 requirements.txt
 pyproject.toml
@@ -37,6 +40,12 @@ Use Python 3.10 or later. In PowerShell:
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+```
+
+Or install the package in editable/development mode:
+
+```powershell
+pip install -e ".[dev]"
 ```
 
 If environment activation is blocked, use `.\.venv\Scripts\python.exe` to run Python commands.
@@ -77,10 +86,11 @@ To measure the reliability and agreement between multiple annotators (e.g. 3 ann
 python -m src.inter_annotator_agreement --input data/processed/manual_label.csv --by-game
 ```
 
-This calculates:
-- **Pairwise Cohen's Kappa** using `scikit-learn` across all pairs of annotators.
-- **Fleiss' Kappa** across all annotators simultaneously using `statsmodels`.
-- **Agreement rate** between VADER suggestions and final consensus manual labels (Rumusan Masalah #4).
+Key methodological features:
+- **Label Normalization:** Leading/trailing whitespaces and casing are cleaned, empty strings are treated as missing values (`pd.NA`), and labels are strictly validated against `{'positive', 'neutral', 'negative'}`.
+- **Pairwise Cohen's Kappa (`scikit-learn`):** Evaluates agreement for every pair of annotators using all available shared ratings (without dropping rows if an un-involved third rater is missing).
+- **Fleiss' Kappa (`statsmodels`):** Evaluates multi-rater categorical agreement simultaneously using all subjects with complete ratings.
+- **Agreement rate:** Measures simple percentage match between VADER suggestions and final consensus manual labels (Rumusan Masalah #4).
 - Automatic benchmark interpretation based on **Landis & Koch (1977)**:
   - `< 0.00` : Poor (worse than chance)
   - `0.00 – 0.20` : Slight
@@ -97,11 +107,11 @@ This calculates:
 | **Fleiss' Kappa** | 0.4067 (Moderate) | 0.3693 (Fair) | 0.4381 (Moderate) |
 
 Pairwise Cohen's Kappa breakdown:
-- Annotator 1 vs. Annotator 2: **0.5483** (Moderate)
-- Annotator 1 vs. Annotator 3: **0.3119** (Fair)
-- Annotator 2 vs. Annotator 3: **0.3692** (Fair)
+- Annotator 1 vs. Annotator 2: **0.5483** (Moderate) [N=600]
+- Annotator 1 vs. Annotator 3: **0.3119** (Fair) [N=600]
+- Annotator 2 vs. Annotator 3: **0.3692** (Fair) [N=600]
 
-## 3. Labeled CSV format
+## 3. Labeled CSV format & data integrity
 
 Required columns for analysis:
 
@@ -111,22 +121,27 @@ Required columns for analysis:
 | `text` | Comment text |
 | `sentiment` | `positive`, `neutral`, or `negative` |
 
-Other columns may be retained. If a `review_status` column is present, analysis will reject rows still marked `needs_review` (accepted values: `reviewed` or `vader_auto`). Both games must be present, and each sentiment class needs at least two examples per game. A larger sample may be needed for an 80:20 stratified split so every class appears in both training and test sets.
+Additional data integrity checks in `load_dataset()`:
+- **`comment_id` uniqueness:** Rejects datasets with duplicate comment IDs.
+- **Duplicate text consistency:** Detects identical comment texts and ensures they do not have conflicting sentiment labels.
+- **Strict `review_status` validation:** Enforces valid values (`reviewed` or `vader_auto`). Rejects missing, case-mismatched, or unreviewed rows (`needs_review`).
 
 ## 4. Training and evaluation
 
-Run the analysis with an 80% training and 20% test stratified split:
+Run the analysis with group-aware splitting (prevents post-level data leakage):
 
 ```powershell
-python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.csv --test-size 0.2 --random-state 42
+python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.csv --split-strategy auto --test-size 0.2 --random-state 42
 ```
 
+### Evaluation methodology:
+- **Post-level grouping (`StratifiedGroupKFold`):** When `post_id` is present, comments from the same Reddit post are grouped entirely in training or testing, measuring the model's true generalization to unseen discussion threads rather than memorizing thread-level topics.
+- **Majority-class baseline (`DummyClassifier`):** A dummy classifier predicting the most frequent class is trained alongside MultinomialNB as an honest reference point.
+- **Macro F1 prioritization:** Because sentiment classes can be imbalanced, Macro F1 is treated as the primary metric, supported by per-class Precision, Recall, and Confusion Matrices.
+
 By default, reports are saved to:
-
 - `reports/sentiment_distribution.csv` - label counts and proportions by game.
-- `reports/model_metrics.json` - accuracy, macro/weighted F1, per-class reports, and confusion matrices.
-
-Models are built and evaluated separately for CS2 and VALORANT. Use comparable collection, filtering, and annotation procedures when comparing the two communities.
+- `reports/model_metrics.json` - accuracy, macro/weighted F1, per-class reports, baseline comparisons, and confusion matrices.
 
 To reproduce a committed snapshot, point `--output-dir` at the corresponding subfolder:
 
@@ -198,16 +213,22 @@ The baseline model has limited performance across all runs, especially on negati
 
 ## Run the tests
 
-Execute the automated test suite:
+Execute the automated test suite with Python's built-in `unittest`:
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
+Or using `pytest`:
+
+```powershell
+pytest tests/ -v
+```
+
 ## Research limitations
 
 - Naive Bayes learns from the supplied labels; it does not turn automatic labels into ground truth.
-- A random stratified split is not an evaluation across time or authors. Duplicate comments or comments from the same post may cause the training and test data to be correlated.
+- Comments from the same thread or author can be correlated; group-aware splitting mitigates post-level leakage but does not capture user-level dynamics across time.
 - TF-IDF and Multinomial Naive Bayes are baseline methods. Document preprocessing choices and limitations involving language, slang, negation, and sarcasm.
 - Comment sentiment does not establish a causal relationship between a game and community opinion.
 - Follow Reddit's terms, subreddit rules, and applicable ethics requirements; minimize the storage of personal information.
