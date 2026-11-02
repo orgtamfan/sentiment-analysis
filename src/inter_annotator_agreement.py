@@ -2,7 +2,10 @@
 
 This module provides functions and a CLI to compute:
 1. Cohen's Kappa per pair of annotators using scikit-learn (`cohen_kappa_score`).
-2. Fleiss' Kappa across all annotators simultaneously using statsmodels (`aggregate_raters` and `fleiss_kappa`).
+   Pairs only require valid annotations for those two annotators (does not discard rows
+   missing labels from an un-involved third annotator).
+2. Fleiss' Kappa across all annotators simultaneously using statsmodels (`aggregate_raters` and `fleiss_kappa`),
+   using rows with complete ratings across all specified raters.
 3. Landis & Koch (1977) interpretation benchmarks for Kappa values.
 4. Agreement rate between VADER suggestions and final consensus / manual labels (simple percentage match).
 """
@@ -64,6 +67,9 @@ def compute_pairwise_cohen_kappas(
 ) -> dict[str, Any]:
     """Compute pairwise Cohen's Kappa for all annotator column combinations.
 
+    Only drops rows where either rater in the pair is NaN, preserving rows that
+    might be missing an annotation from an uninvolved third rater.
+
     Args:
         df: DataFrame containing annotations.
         rater_columns: List/tuple of column names corresponding to raters.
@@ -108,8 +114,10 @@ def compute_fleiss_kappa(
     Uses `statsmodels.stats.inter_rater.aggregate_raters` to convert text categories
     into a contingency count matrix, then computes Fleiss' Kappa.
 
+    Requires complete annotations across all specified rater columns.
+
     Args:
-        df: DataFrame containing annotations.
+        df: DataFrame containing annotations (only rows with complete ratings).
         rater_columns: List/tuple of column names representing annotators.
         method: Method argument passed to statsmodels `fleiss_kappa` ('fleiss').
 
@@ -159,7 +167,7 @@ def compute_vader_vs_consensus_agreement(
     vader_clean = subset[vader_col].astype(str).str.strip().str.lower()
     consensus_clean = subset[consensus_col].astype(str).str.strip().str.lower()
 
-    matches = (vader_clean == consensus_clean)
+    matches = vader_clean == consensus_clean
     n_total = int(len(subset))
     n_matches = int(matches.sum())
     agreement_rate = float(matches.mean()) if n_total > 0 else 0.0
@@ -182,6 +190,10 @@ def analyze_agreement(
 ) -> dict[str, Any]:
     """Run full agreement analysis: pairwise Cohen's Kappa, Fleiss' Kappa, and optional VADER match.
 
+    Cohen's Kappa uses all available pairs from df (does not unnecessarily drop rows
+    if an uninvolved third rater is NaN).
+    Fleiss' Kappa uses only rows with complete annotations across all raters.
+
     Args:
         df: DataFrame with annotations.
         rater_columns: Annotator column names.
@@ -191,13 +203,15 @@ def analyze_agreement(
     Returns:
         Structured dictionary of agreement metrics.
     """
-    clean_df = df.dropna(subset=rater_columns).copy()
+    # 1. Pairwise Cohen: use full df (each pair drops only its own NaNs)
+    pairwise = compute_pairwise_cohen_kappas(df, rater_columns=rater_columns)
 
-    pairwise = compute_pairwise_cohen_kappas(clean_df, rater_columns=rater_columns)
-    fleiss = compute_fleiss_kappa(clean_df, rater_columns=rater_columns)
+    # 2. Fleiss multi-rater: requires complete data across all raters
+    complete_df = df.dropna(subset=rater_columns).copy()
+    fleiss = compute_fleiss_kappa(complete_df, rater_columns=rater_columns)
 
     report: dict[str, Any] = {
-        "n_subjects": int(len(clean_df)),
+        "n_subjects_complete": int(len(complete_df)),
         "n_raters": len(rater_columns),
         "raters": list(rater_columns),
         "categories": fleiss["categories"],
@@ -208,7 +222,12 @@ def analyze_agreement(
         },
     }
 
-    if vader_col and consensus_col and vader_col in df.columns and consensus_col in df.columns:
+    if (
+        vader_col
+        and consensus_col
+        and vader_col in df.columns
+        and consensus_col in df.columns
+    ):
         report["vader_vs_consensus"] = compute_vader_vs_consensus_agreement(
             df, vader_col=vader_col, consensus_col=consensus_col
         )
@@ -276,8 +295,12 @@ def main() -> None:
                 break
 
         if raters is None:
-            # fallback to any annotator_* or label_* columns
-            found = [c for c in df.columns if c.startswith(("annotator_", "label_")) and c not in ("label_review",)]
+            found = [
+                c
+                for c in df.columns
+                if c.startswith(("annotator_", "label_"))
+                and c not in ("label_review",)
+            ]
             if len(found) >= 2:
                 raters = sorted(found)
             else:
@@ -314,14 +337,14 @@ def main() -> None:
     }
 
     overall = results["overall"]
-    print(f"Subjects  : {overall['n_subjects']}")
+    print(f"Complete subjects (Fleiss): {overall['n_subjects_complete']}")
     print(f"Categories: {', '.join(overall['categories'])}")
 
     print("\n[1. Cohen's Kappa per Pasangan Annotator (scikit-learn)]")
     for pair_name, details in overall["cohens_kappa"]["pairs"].items():
         print(
             f"  {details['rater1']} vs {details['rater2']}: "
-            f"kappa = {details['kappa']:.4f} ({details['interpretation']})"
+            f"kappa = {details['kappa']:.4f} ({details['interpretation']}) [N={details['n_samples']}]"
         )
     print(
         f"  Mean Cohen's Kappa: {overall['cohens_kappa']['mean_cohens_kappa']:.4f} "
@@ -350,11 +373,11 @@ def main() -> None:
             )
             results["by_game"][game_key] = game_analysis
 
-            print(f"\n--- Game: {game_val} (N = {game_analysis['n_subjects']}) ---")
+            print(f"\n--- Game: {game_val} (Complete N = {game_analysis['n_subjects_complete']}) ---")
             for pair_name, details in game_analysis["cohens_kappa"]["pairs"].items():
                 print(
                     f"  Cohen {details['rater1']} vs {details['rater2']}: "
-                    f"{details['kappa']:.4f} ({details['interpretation']})"
+                    f"{details['kappa']:.4f} ({details['interpretation']}) [N={details['n_samples']}]"
                 )
             print(
                 f"  Mean Cohen: {game_analysis['cohens_kappa']['mean_cohens_kappa']:.4f} "
