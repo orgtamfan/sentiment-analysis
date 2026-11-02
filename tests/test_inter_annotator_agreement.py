@@ -1,14 +1,17 @@
-"""Unit tests for Cohen's Kappa, Fleiss' Kappa (via statsmodels), and VADER agreement."""
+"""Unit tests for inter_annotator_agreement module."""
 
 import unittest
+import numpy as np
 import pandas as pd
 
 from src.inter_annotator_agreement import (
+    analyze_agreement,
     compute_cohens_kappa,
     compute_fleiss_kappa,
     compute_pairwise_cohen_kappas,
     compute_vader_vs_consensus_agreement,
     interpret_kappa,
+    normalize_labels,
 )
 
 
@@ -37,6 +40,49 @@ class TestInterAnnotatorAgreement(unittest.TestCase):
         res = compute_fleiss_kappa(df, ["annotator_1", "annotator_2", "annotator_3"])
         self.assertIn("kappa", res)
         self.assertGreater(res["kappa"], 0.5)
+
+    def test_normalization_strips_whitespace_and_handles_empty(self):
+        df = pd.DataFrame({
+            "r1": [" Positive  ", "  ", None, "NEGATIVE"],
+            "r2": ["neutral", "positive", "   ", "negative"],
+        })
+        norm = normalize_labels(df, ["r1", "r2"])
+        self.assertEqual(norm["r1"].iloc[0], "positive")
+        self.assertTrue(pd.isna(norm["r1"].iloc[1]))
+        self.assertTrue(pd.isna(norm["r1"].iloc[2]))
+        self.assertEqual(norm["r1"].iloc[3], "negative")
+
+    def test_normalization_rejects_invalid_categories(self):
+        df = pd.DataFrame({
+            "r1": ["positive", "sarcastic"],
+        })
+        with self.assertRaisesRegex(ValueError, "invalid sentiment label"):
+            normalize_labels(df, ["r1"])
+
+    def test_pairwise_cohen_with_missing_annotator_data(self):
+        # 3 annotators; annotator 3 has missing value on row 0, but 1 & 2 are complete.
+        df = pd.DataFrame({
+            "a1": ["positive", "neutral", "negative"],
+            "a2": ["positive", "neutral", "negative"],
+            "a3": ["   ", "neutral", "negative"],  # empty string normalized to NA
+        })
+        res = compute_pairwise_cohen_kappas(df, ["a1", "a2", "a3"])
+        # a1 vs a2 should have all 3 samples evaluated with kappa = 1.0
+        self.assertEqual(res["pairs"]["a1_vs_a2"]["n_samples"], 3)
+        self.assertAlmostEqual(res["pairs"]["a1_vs_a2"]["kappa"], 1.0)
+        # a1 vs a3 should have only 2 valid samples
+        self.assertEqual(res["pairs"]["a1_vs_a3"]["n_samples"], 2)
+
+    def test_fleiss_kappa_when_no_complete_rows(self):
+        # Every row has at least one missing annotator
+        df = pd.DataFrame({
+            "a1": ["positive", None],
+            "a2": [None, "neutral"],
+            "a3": ["positive", "negative"],
+        })
+        res = compute_fleiss_kappa(df, ["a1", "a2", "a3"])
+        self.assertEqual(res["n_subjects"], 0)
+        self.assertTrue(np.isnan(res["kappa"]))
 
     def test_vader_vs_consensus_agreement(self):
         df = pd.DataFrame({

@@ -61,6 +61,29 @@ def load_dataset(input_path: Path) -> pd.DataFrame:
     if dataset["text"].eq("").any():
         raise ValueError("Text entries cannot be empty.")
 
+    # Integrity checks: check duplicate comment_id and report/validate exact text duplicates
+    if "comment_id" in dataset.columns:
+        duplicate_ids = dataset["comment_id"].duplicated()
+        if duplicate_ids.any():
+            raise ValueError(
+                f"Found {duplicate_ids.sum()} duplicate comment IDs in dataset."
+            )
+
+    # Check for text duplicates per game
+    duplicate_texts = dataset.duplicated(subset=["game", "text"])
+    if duplicate_texts.any():
+        n_dupe_texts = int(duplicate_texts.sum())
+        # Check if conflicting sentiment labels exist for identical texts
+        text_sentiment_counts = (
+            dataset.groupby(["game", "text"])["sentiment"]
+            .nunique()
+        )
+        conflicts = text_sentiment_counts[text_sentiment_counts > 1]
+        if not conflicts.empty:
+            raise ValueError(
+                f"Found {len(conflicts)} duplicate text(s) with conflicting sentiment labels."
+            )
+
     # Strict validation of review_status: must be explicitly valid, not just non-'needs_review'
     if "review_status" in dataset.columns:
         status_series = (
@@ -243,8 +266,10 @@ def analyze_dataset(
 
         if use_group:
             # StratifiedGroupKFold splits groups (posts) across folds while balancing classes
+            min_class_count = int(class_counts.min())
             n_splits = int(round(1.0 / test_size)) if test_size > 0 else 5
-            n_splits = max(2, min(n_splits, game_data["post_id"].nunique()))
+            n_splits = min(n_splits, game_data["post_id"].nunique(), min_class_count)
+            n_splits = max(2, n_splits)
             sgkf = StratifiedGroupKFold(
                 n_splits=n_splits, shuffle=True, random_state=random_state
             )

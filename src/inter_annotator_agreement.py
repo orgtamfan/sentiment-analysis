@@ -24,6 +24,47 @@ from sklearn.metrics import cohen_kappa_score
 from statsmodels.stats.inter_rater import aggregate_raters, fleiss_kappa
 
 
+VALID_CATEGORIES = {"positive", "neutral", "negative"}
+
+
+def normalize_labels(df: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:
+    """Normalize annotator label columns: strip whitespace, lowercase, and validate.
+
+    Empty strings and whitespace-only values are converted to pd.NA.
+    Validates that any non-empty label belongs to {'positive', 'neutral', 'negative'}.
+
+    Args:
+        df: Input DataFrame containing annotator columns.
+        columns: Column names to normalize.
+
+    Returns:
+        A copy of df with normalized columns.
+
+    Raises:
+        ValueError: If any unrecognized categorical value is encountered.
+    """
+    result = df.copy()
+    for col in columns:
+        if col not in result.columns:
+            continue
+        cleaned = (
+            result[col]
+            .astype("string")
+            .str.strip()
+            .str.lower()
+            .replace("", pd.NA)
+        )
+        non_na = cleaned.dropna()
+        invalid = set(non_na.unique()) - VALID_CATEGORIES
+        if invalid:
+            raise ValueError(
+                f"Column '{col}' contains invalid sentiment label(s): {sorted(invalid)}. "
+                f"Allowed values: {sorted(VALID_CATEGORIES)}."
+            )
+        result[col] = cleaned
+    return result
+
+
 def interpret_kappa(kappa: float) -> str:
     """Interpret kappa value according to Landis & Koch (1977) benchmark.
 
@@ -78,15 +119,19 @@ def compute_pairwise_cohen_kappas(
     Returns:
         Dictionary containing pairwise kappa scores, interpretations, and mean kappa.
     """
+    normalized_df = normalize_labels(df, rater_columns)
     pairs = list(itertools.combinations(rater_columns, 2))
     results: dict[str, Any] = {"pairs": {}, "mean_cohens_kappa": 0.0}
 
     scores = []
     for col1, col2 in pairs:
-        valid_mask = df[col1].notna() & df[col2].notna()
-        r1 = df.loc[valid_mask, col1].astype(str).str.strip().str.lower()
-        r2 = df.loc[valid_mask, col2].astype(str).str.strip().str.lower()
-        score = compute_cohens_kappa(r1, r2, labels=labels)
+        valid_mask = normalized_df[col1].notna() & normalized_df[col2].notna()
+        r1 = normalized_df.loc[valid_mask, col1]
+        r2 = normalized_df.loc[valid_mask, col2]
+        if valid_mask.sum() == 0:
+            score = float("nan")
+        else:
+            score = compute_cohens_kappa(r1, r2, labels=labels)
         pair_key = f"{col1}_vs_{col2}"
         results["pairs"][pair_key] = {
             "rater1": col1,
@@ -124,9 +169,16 @@ def compute_fleiss_kappa(
     Returns:
         Dictionary with Fleiss' Kappa score, category mappings, and interpretation.
     """
-    clean_df = df.dropna(subset=rater_columns).copy()
-    for col in rater_columns:
-        clean_df[col] = clean_df[col].astype(str).str.strip().str.lower()
+    normalized_df = normalize_labels(df, rater_columns)
+    clean_df = normalized_df.dropna(subset=rater_columns).copy()
+    if len(clean_df) == 0:
+        return {
+            "kappa": float("nan"),
+            "interpretation": "Undefined (no complete subjects)",
+            "categories": sorted(list(VALID_CATEGORIES)),
+            "n_subjects": 0,
+            "n_raters": len(rater_columns),
+        }
 
     labels_matrix = clean_df[list(rater_columns)].values
     contingency_table, categories = aggregate_raters(labels_matrix)
