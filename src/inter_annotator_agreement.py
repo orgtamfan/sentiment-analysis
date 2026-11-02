@@ -119,6 +119,8 @@ def compute_pairwise_cohen_kappas(
     Returns:
         Dictionary containing pairwise kappa scores, interpretations, and mean kappa.
     """
+    if len(rater_columns) < 2:
+        raise ValueError("At least two annotators are required for Cohen's Kappa.")
     normalized_df = normalize_labels(df, rater_columns)
     pairs = list(itertools.combinations(rater_columns, 2))
     results: dict[str, Any] = {"pairs": {}, "mean_cohens_kappa": 0.0}
@@ -175,6 +177,8 @@ def compute_fleiss_kappa(
     Returns:
         Dictionary with Fleiss' Kappa score, category mappings, and interpretation.
     """
+    if len(rater_columns) < 2:
+        raise ValueError("At least two annotators are required for Fleiss' Kappa.")
     normalized_df = normalize_labels(df, rater_columns)
     clean_df = normalized_df.dropna(subset=rater_columns).copy()
     if len(clean_df) == 0:
@@ -220,11 +224,12 @@ def compute_vader_vs_consensus_agreement(
             f"Columns '{vader_col}' or '{consensus_col}' not found in dataframe."
         )
 
-    valid_mask = df[vader_col].notna() & df[consensus_col].notna()
-    subset = df.loc[valid_mask].copy()
+    normalized = normalize_labels(df, [vader_col, consensus_col])
+    valid_mask = normalized[vader_col].notna() & normalized[consensus_col].notna()
+    subset = normalized.loc[valid_mask]
 
-    vader_clean = subset[vader_col].astype(str).str.strip().str.lower()
-    consensus_clean = subset[consensus_col].astype(str).str.strip().str.lower()
+    vader_clean = subset[vader_col]
+    consensus_clean = subset[consensus_col]
 
     matches = vader_clean == consensus_clean
     n_total = int(len(subset))
@@ -262,6 +267,8 @@ def analyze_agreement(
     Returns:
         Structured dictionary of agreement metrics.
     """
+    if len(rater_columns) < 2:
+        raise ValueError("At least two annotators are required for agreement analysis.")
     # 1. Pairwise Cohen: use full df (each pair drops only its own NaNs)
     pairwise = compute_pairwise_cohen_kappas(df, rater_columns=rater_columns)
 

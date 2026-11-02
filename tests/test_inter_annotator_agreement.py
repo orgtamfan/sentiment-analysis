@@ -97,6 +97,24 @@ class TestInterAnnotatorAgreement(unittest.TestCase):
         self.assertAlmostEqual(res["agreement_rate"], 0.75, places=4)
         self.assertEqual(res["agreement_percentage"], "75.00%")
 
+    def test_vader_agreement_normalizes_and_ignores_whitespace_only(self):
+        df = pd.DataFrame({
+            "vader": [" Positive ", "   ", "sarcastic"],
+            "consensus": ["positive", "negative", "sarcastic"],
+        })
+        with self.assertRaisesRegex(ValueError, "invalid sentiment label"):
+            compute_vader_vs_consensus_agreement(df, "vader", "consensus")
+
+        df.loc[2, "vader"] = "negative"
+        df.loc[2, "consensus"] = "negative"
+        res = compute_vader_vs_consensus_agreement(df, "vader", "consensus")
+        self.assertEqual(res["n_samples"], 2)
+        self.assertEqual(res["n_matches"], 2)
+
+    def test_agreement_requires_two_annotators(self):
+        with self.assertRaisesRegex(ValueError, "At least two annotators"):
+            analyze_agreement(pd.DataFrame({"a": ["positive"]}), ["a"])
+
     def test_interpretation(self):
         self.assertIn("Almost Perfect", interpret_kappa(0.85))
         self.assertIn("Substantial", interpret_kappa(0.70))

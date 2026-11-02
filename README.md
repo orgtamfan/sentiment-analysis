@@ -153,7 +153,7 @@ python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.
 
 ## Recorded runs
 
-Three model snapshots are committed under `data/processed/`. All runs use TF-IDF (unigrams + bigrams) + Multinomial Naive Bayes, 80/20 stratified split, `random_state=42`.
+Three historical model snapshots are committed under `data/processed/`. Their reported scores were produced before the current group-aware split safeguards, so they are retained as historical artifacts and must not be cited as results from the current implementation. The repository does not contain the source CSVs needed to regenerate them; rerun against the authorized final labeled datasets before reporting updated scores. The current code uses TF-IDF (unigrams + bigrams) + Multinomial Naive Bayes, with `random_state=42` and an 80/20 test fraction by default. `auto` uses group-aware splitting when possible and records any stratified fallback.
 
 ### 1. Full dataset (VADER automated labels) — `reddit_comments_labeled_analysis/`
 

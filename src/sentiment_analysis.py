@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import pandas as pd
 from sklearn.dummy import DummyClassifier
@@ -245,6 +245,8 @@ def analyze_dataset(
     """
     if not 0 < test_size < 1:
         raise ValueError("test_size must be between 0 and 1.")
+    if split_strategy not in {"auto", "group", "stratified"}:
+        raise ValueError("split_strategy must be 'auto', 'group', or 'stratified'.")
 
     dataset = load_dataset(input_path)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -348,22 +350,55 @@ def analyze_dataset(
                 "n_groups_test": int(len(post_test)),
             }
         else:
-            try:
-                train_text, test_text, train_labels, test_labels = train_test_split(
-                    game_data["text"],
-                    game_data["sentiment"],
-                    test_size=test_size,
-                    random_state=random_state,
-                    stratify=game_data["sentiment"],
+            duplicate_texts_exist = game_data["text"].duplicated(keep=False).any()
+            if duplicate_texts_exist:
+                # Even without post IDs, keep identical texts on one side of the split.
+                rows = game_data.assign(_row_group=range(len(game_data)))
+                text_groups = _build_leak_free_groups(
+                    rows, group_col="_row_group", text_col="text"
                 )
-            except ValueError as error:
-                raise ValueError(
-                    f"Could not create a stratified split for '{game}'. "
-                    "Add more labeled examples or adjust test_size."
-                ) from error
-            split_info = {
-                "strategy": "StratifiedShuffleSplit",
-            }
+                n_splits = min(
+                    max(2, int(round(1.0 / test_size))),
+                    int(text_groups.nunique()),
+                    int(class_counts.min()),
+                )
+                if n_splits < 2:
+                    raise ValueError(
+                        f"Could not create a text-group split for '{game}'. "
+                        "Add more distinct examples or adjust test_size."
+                    )
+                splitter = StratifiedGroupKFold(
+                    n_splits=n_splits, shuffle=True, random_state=random_state
+                )
+                train_idx, test_idx = next(
+                    splitter.split(
+                        game_data["text"], game_data["sentiment"], groups=text_groups
+                    )
+                )
+                train_text = game_data.iloc[train_idx]["text"]
+                train_labels = game_data.iloc[train_idx]["sentiment"]
+                test_text = game_data.iloc[test_idx]["text"]
+                test_labels = game_data.iloc[test_idx]["sentiment"]
+                split_info = {
+                    "strategy": "StratifiedGroupKFold",
+                    "grouping": "identical_text_only",
+                    "n_text_groups": int(text_groups.nunique()),
+                }
+            else:
+                try:
+                    train_text, test_text, train_labels, test_labels = train_test_split(
+                        game_data["text"],
+                        game_data["sentiment"],
+                        test_size=test_size,
+                        random_state=random_state,
+                        stratify=game_data["sentiment"],
+                    )
+                except ValueError as error:
+                    raise ValueError(
+                        f"Could not create a stratified split for '{game}'. "
+                        "Add more labeled examples or adjust test_size."
+                    ) from error
+                split_info = {"strategy": "StratifiedShuffleSplit"}
             if fallback_reason:
                 split_info["fallback_reason"] = fallback_reason
 
@@ -388,13 +423,14 @@ def analyze_dataset(
         dummy.fit(train_text, train_labels)
         dummy_predictions = dummy.predict(test_text)
         dummy_eval = _evaluate_predictions(test_labels, dummy_predictions)
+        majority_class = train_labels.value_counts().idxmax()
 
         metrics["games"][game] = {
             "n_samples": int(len(game_data)),
             "n_train": int(len(train_text)),
             "n_test": int(len(test_text)),
             "split_info": split_info,
-            "majority_class": str(dummy.classes_[0]),
+            "majority_class": str(majority_class),
             "naive_bayes": model_eval,
             "majority_baseline": dummy_eval,
             # Backward compatibility fields at root of game entry

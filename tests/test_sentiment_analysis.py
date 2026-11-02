@@ -218,6 +218,32 @@ class SentimentAnalysisTests(unittest.TestCase):
                 self.assertEqual(info["strategy"], "StratifiedShuffleSplit")
                 self.assertEqual(info["fallback_reason"], "missing 'post_id' column")
 
+    def test_direct_call_rejects_unknown_split_strategy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            input_path = root / "reddit_posts.csv"
+            self._dataset().to_csv(input_path, index=False)
+            with self.assertRaisesRegex(ValueError, "split_strategy must be"):
+                analyze_dataset(input_path, root / "reports", split_strategy="random")
+
+    def test_auto_fallback_groups_identical_text_without_post_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            input_path = root / "duplicate_text.csv"
+            dataset = self._dataset().drop(columns=["post_id"])
+            for game in ("cs2", "valorant"):
+                mask = (dataset["game"] == game) & (dataset["sentiment"] == "positive")
+                indexes = dataset.index[mask][:2]
+                dataset.loc[indexes[1], "text"] = dataset.loc[indexes[0], "text"]
+            dataset.to_csv(input_path, index=False)
+
+            result = analyze_dataset(input_path, root / "reports", split_strategy="auto")
+
+            for game in ("cs2", "valorant"):
+                info = result["games"][game]["split_info"]
+                self.assertEqual(info["strategy"], "StratifiedGroupKFold")
+                self.assertEqual(info["grouping"], "identical_text_only")
+
 
 if __name__ == "__main__":
     unittest.main()
