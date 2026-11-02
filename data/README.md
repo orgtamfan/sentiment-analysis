@@ -7,14 +7,15 @@ This dataset was collected for the research project:
 
 ```text
 data/
-+-- raw/                                        # gitignored — raw scrape output
++-- raw/                                        # gitignored — raw scrape output (contains author usernames)
 |   +-- reddit_comments_raw.json               # Combined raw dataset (CS2 + VALORANT)
 |   +-- cs2_comments_raw.json                  # Raw comments from r/GlobalOffensive
 |   +-- valorant_comments_raw.json             # Raw comments from r/VALORANT
 +-- processed/
     +-- reddit_comments_label_review.csv       # gitignored — VADER suggestions pending review
-    +-- reddit_comments_labeled.csv            # gitignored — final labeled dataset (full, 10 000 rows)
-    +-- reddit_comments_labeled_analysis/      # committed — report snapshot: full 5 000/game run
+    +-- reddit_comments_labeled.csv            # gitignored — VADER auto-labeled dataset (full, 10 000 rows)
+    +-- manual_label.csv                       # gitignored — 3-annotator manual annotation dataset (600 rows)
+    +-- reddit_comments_labeled_analysis/      # committed — report snapshot: full 5 000/game VADER baseline run
     |   +-- model_metrics.json
     |   +-- sentiment_distribution.csv
     +-- vader_subset_600_for_repo/             # committed — report snapshot: 300/game VADER-labeled subset
@@ -26,7 +27,7 @@ data/
 ```
 
 > [!NOTE]
-> `data/raw/` and the two top-level CSVs are gitignored because they contain raw user-generated text. Only pre-computed report snapshots (JSON + CSV) are committed.
+> `data/raw/` and processed comment CSVs are gitignored to preserve user privacy (anonymization and avoiding distributing raw social media scrapes with personal usernames). Pre-computed aggregate report snapshots (JSON + CSV) and the model code are committed for research transparency and reproducibility.
 
 ## 2. Raw JSON schema
 
@@ -48,16 +49,16 @@ Each JSON file is a list of comment objects with the following fields:
 
 ## 3. Processed CSV schema
 
-The labeled CSVs (`reddit_comments_label_review.csv` and `reddit_comments_labeled.csv`) contain:
+The labeled CSVs contain:
 
 | Column | Values |
 |---|---|
 | `game` | `cs2` or `valorant` |
-| `text` | Anonymized comment text |
+| `text` | Comment text |
 | `sentiment` | `positive`, `neutral`, or `negative` |
 | `sentiment_suggestion` | VADER suggestion (for reference) |
 | `vader_compound` | VADER compound score (−1 to 1) |
-| `review_status` | `reviewed` or `needs_review` |
+| `review_status` | `vader_auto` (automatic VADER labels), `needs_review`, or `reviewed` (human adjudicated) |
 
 ## 4. Data integrity notes
 

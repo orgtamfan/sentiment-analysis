@@ -7,9 +7,6 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Tests folder — excluded from repo commit
-tests/
-
 # Large raw and fully-labeled datasets — do not commit
 data/raw/
 data/processed/reddit_comments_labeled.csv

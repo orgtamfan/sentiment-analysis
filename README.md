@@ -11,9 +11,9 @@ data/
   raw/                                        # gitignored — raw scrape output (JSON)
   processed/
     reddit_comments_label_review.csv          # gitignored — VADER suggestions pending review
-    reddit_comments_labeled.csv               # gitignored — final labeled dataset (full)
+    reddit_comments_labeled.csv               # gitignored — VADER auto-labeled dataset (full)
     manual_label.csv                          # gitignored — 3-annotator manual annotation dataset
-    reddit_comments_labeled_analysis/         # committed — report snapshot: full 5 000/game run
+    reddit_comments_labeled_analysis/         # committed — report snapshot: full 5 000/game VADER baseline run
     vader_subset_600_for_repo/                # committed — report snapshot: 300/game VADER-labeled subset
     manual_labeled_for_repo/                  # committed — report snapshot: 300/game manually labeled subset
 reports/                                      # gitignored — regenerated on each local run
@@ -21,12 +21,13 @@ src/
   prepare_labels.py             # Generate VADER label suggestions for review
   sentiment_analysis.py         # Train and evaluate a Naive Bayes model per game
   inter_annotator_agreement.py  # Cohen's Kappa, Fleiss' Kappa, and VADER agreement rate
+tests/                          # Automated unit tests
 README.md
 requirements.txt
 pyproject.toml
 ```
 
-Raw data in `data/raw/`, full labeled CSVs, and the generated `reports/` directory are gitignored. Pre-computed report snapshots in `data/processed/*/` are committed for reproducibility. Do not commit datasets containing personal information or data you are not authorized to publish.
+Raw data in `data/raw/`, full comment CSVs, and the generated `reports/` directory are gitignored to preserve user privacy. Pre-computed report snapshots in `data/processed/*/` are committed for reproducibility. Do not commit datasets containing personal usernames or data you are not authorized to publish.
 
 ## Environment setup
 
@@ -64,7 +65,7 @@ The review CSV contains:
 - `review_status`: initially set to `needs_review`
 - `game`, `text`, and comment metadata
 
-Open the CSV in a spreadsheet. Compare each suggestion with the comment and its context, fill in the `sentiment` column, and then change `review_status` to `reviewed`. Save the completed copy as `data/processed/reddit_comments_labeled.csv`. Do not overwrite the raw JSON. The script also will not overwrite an existing review CSV.
+Open the CSV in a spreadsheet. Compare each suggestion with the comment and its context, fill in the `sentiment` column, and then change `review_status` to `reviewed` (or `vader_auto` if keeping automated labels). Save the completed copy as `data/processed/reddit_comments_labeled.csv`. Do not overwrite the raw JSON. The script also will not overwrite an existing review CSV.
 
 **Important:** VADER is a lexicon-based aid, not an infallible annotator. Gaming slang, sarcasm, very short comments, and off-topic text can produce incorrect suggestions. Labels copied directly from VADER are not independent ground truth; evaluating a model against them measures agreement with VADER suggestions, not accuracy against validated human annotations.
 
@@ -107,10 +108,10 @@ Required columns for analysis:
 | Column | Values |
 |---|---|
 | `game` | `cs2` or `valorant` |
-| `text` | Anonymized post or comment text |
+| `text` | Comment text |
 | `sentiment` | `positive`, `neutral`, or `negative` |
 
-Other columns may be retained. If a `review_status` column is present, analysis will reject rows still marked `needs_review`. Both games must be present, and each sentiment class needs at least two examples per game. A larger sample may be needed for an 80:20 stratified split so every class appears in both training and test sets.
+Other columns may be retained. If a `review_status` column is present, analysis will reject rows still marked `needs_review` (accepted values: `reviewed` or `vader_auto`). Both games must be present, and each sentiment class needs at least two examples per game. A larger sample may be needed for an 80:20 stratified split so every class appears in both training and test sets.
 
 ## 4. Training and evaluation
 
@@ -137,9 +138,9 @@ python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.
 
 Three model snapshots are committed under `data/processed/`. All runs use TF-IDF (unigrams + bigrams) + Multinomial Naive Bayes, 80/20 stratified split, `random_state=42`.
 
-### 1. Full dataset — `reddit_comments_labeled_analysis/`
+### 1. Full dataset (VADER automated labels) — `reddit_comments_labeled_analysis/`
 
-5,000 comments per game (4,000 train / 1,000 test), VADER-suggested labels reviewed and finalized.
+5,000 comments per game (4,000 train / 1,000 test) labeled using VADER lexicon suggestions (`vader_auto`) to establish a large-scale automated baseline.
 
 **Label distribution:**
 
@@ -175,7 +176,7 @@ Three model snapshots are committed under `data/processed/`. All runs use TF-IDF
 
 ### 3. Manually labeled subset — `manual_labeled_for_repo/`
 
-300 comments per game (240 train / 60 test), labels assigned through manual annotation.
+300 comments per game (240 train / 60 test), labels assigned through manual annotation and consensus.
 
 **Label distribution:**
 
@@ -194,6 +195,14 @@ Three model snapshots are committed under `data/processed/`. All runs use TF-IDF
 ---
 
 The baseline model has limited performance across all runs, especially on negative and neutral classes. See the confusion matrices and per-class metrics in the corresponding `model_metrics.json` files; do not rely on accuracy alone. Results reflect the dataset labels used at the time of analysis and do not automatically represent independent human annotations.
+
+## Run the tests
+
+Execute the automated test suite:
+
+```powershell
+python -m unittest discover -s tests -v
+```
 
 ## Research limitations
 
