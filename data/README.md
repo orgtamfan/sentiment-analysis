@@ -1,30 +1,33 @@
-# Dataset Reddit Comments: CS2 vs VALORANT
+# Reddit Comment Dataset: CS2 vs. VALORANT
 
 ## 1. Folder structure
 
 ```text
 data/
-└── raw/
-    ├── cs2_comments_raw.csv         # Komentar mentah dari r/GlobalOffensive
-    ├── valorant_comments_raw.csv    # Komentar mentah dari r/VALORANT
-    └── reddit_comments_raw.csv      # Dataset gabungan mentah (CS2 + VALORANT)
+  raw/
+    +-- cs2_comments_raw.csv       # Raw comments from r/GlobalOffensive
+    +-- valorant_comments_raw.csv  # Raw comments from r/VALORANT
+    +-- reddit_comments_raw.csv    # Combined raw dataset (CS2 + VALORANT)
 ```
 
-## 2. Skema Data CSV
-Setiap file CSV memiliki kolom-kolom berikut:
-- `game`: Label game (`CS2` atau `VALORANT`)
-- `subreddit`: Asal subreddit (`GlobalOffensive` atau `VALORANT`)
-- `post_id`: ID postingan Reddit
-- `post_title`: Judul thread/postingan Reddit
-- `post_url`: URL postingan Reddit
-- `comment_id`: ID unik komentar
-- `comment_text`: Teks mentah komentar (tanpa lowercase, tanpa stopword removal, tanpa stemming, tanpa penghapusan tanda baca)
-- `comment_score`: Skor upvote/downvote net komentar
-- `comment_created_at`: Waktu pembuatan komentar (format ISO 8601 UTC)
-- `author`: Username pembuat komentar (metadata)
-- `scraped_at`: Timestamp proses scraping dijalankan (UTC)
+## 2. CSV schema
 
-## 3. Catatan Integritas Data
-- Teks komentar dibiarkan asli apa adanya (raw) untuk keperluan tahapan preprocessing selanjutnya.
-- Komentar `[deleted]` dan `[removed]` telah disaring otomatis saat pengumpulan data.
-- Duplikasi `comment_id` telah disaring secara otomatis.
+Each CSV file contains the following columns:
+
+- `game`: Game label (`CS2` or `VALORANT`)
+- `subreddit`: Source subreddit (`GlobalOffensive` or `VALORANT`)
+- `post_id`: Reddit post ID
+- `post_title`: Post or thread title
+- `post_url`: Post URL
+- `comment_id`: Unique comment ID
+- `comment_text`: Original comment text (no lowercasing, stop-word removal, stemming, or punctuation removal)
+- `comment_score`: Net upvote/downvote score
+- `comment_created_at`: Comment creation time in ISO 8601 UTC format
+- `author`: Comment author's username (metadata)
+- `scraped_at`: Scrape timestamp in UTC
+
+## 3. Data integrity notes
+
+- Comment text is preserved in its original form for later preprocessing.
+- Comments marked `[deleted]` or `[removed]` were automatically filtered during collection.
+- Duplicate `comment_id` values were automatically removed.

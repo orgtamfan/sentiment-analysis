@@ -433,7 +433,7 @@ def main() -> None:
 
     if "vader_vs_consensus" in overall:
         v_res = overall["vader_vs_consensus"]
-        print("\n[3. Agreement Rate VADER vs. Konsensus Manual (Rumusan Masalah #4)]")
+        print("\n[3. VADER vs. Manual Consensus Agreement Rate (Research Question 4)]")
         print(f"  Matched: {v_res['n_matches']} / {v_res['n_samples']}")
         print(f"  Agreement rate: {v_res['agreement_percentage']}")
 
@@ -473,7 +473,7 @@ def main() -> None:
             )
             if "vader_vs_consensus" in game_analysis:
                 vg = game_analysis["vader_vs_consensus"]
-                print(f"  VADER vs Konsensus: {vg['agreement_percentage']} ({vg['n_matches']}/{vg['n_samples']})")
+                print(f"  VADER vs. Consensus: {vg['agreement_percentage']} ({vg['n_matches']}/{vg['n_samples']})")
 
     print("=" * 65)
 

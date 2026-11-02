@@ -159,6 +159,8 @@ def _split_game_indices(
         )
     )
     split_info["n_clusters"] = n_clusters
+    if split_info.get("grouping") == "identical_text_only":
+        split_info["n_text_groups"] = n_clusters
     if can_group_by_post:
         split_info["n_groups_train"] = int(
             game_data.iloc[train_idx]["post_id"].nunique()
@@ -437,6 +439,7 @@ def analyze_dataset(
         split_info["test_class_counts"] = {
             label: int(test_labels.value_counts().get(label, 0)) for label in SENTIMENTS
         }
+        split_info["actual_test_fraction"] = len(test_idx) / len(game_data)
 
         # Train MultinomialNB model
         model = _build_model()

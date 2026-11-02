@@ -30,7 +30,7 @@ requirements.txt
 pyproject.toml
 ```
 
-Raw data in `data/raw/`, full comment CSVs, and the generated `reports/` directory are gitignored to preserve user privacy. Pre-computed report snapshots in `data/processed/*/` are committed for reproducibility. Do not commit datasets containing personal usernames or data you are not authorized to publish.
+Raw data in `data/raw/`, full comment CSVs, and the generated `reports/` directory are gitignored to preserve user privacy. Pre-computed report snapshots in `data/processed/*/` are committed for inspection, but the source CSVs are not included, so the reported experiments cannot currently be reproduced from this repository alone. Do not commit datasets containing personal usernames or data you are not authorized to publish.
 
 ## Environment setup
 
@@ -90,7 +90,7 @@ Key methodological features:
 - **Label Normalization:** Leading/trailing whitespaces and casing are cleaned, empty strings are treated as missing values (`pd.NA`), and labels are strictly validated against `{'positive', 'neutral', 'negative'}`.
 - **Pairwise Cohen's Kappa (`scikit-learn`):** Evaluates agreement for every pair of annotators using all available shared ratings (without dropping rows if an un-involved third rater is missing).
 - **Fleiss' Kappa (`statsmodels`):** Evaluates multi-rater categorical agreement simultaneously using all subjects with complete ratings.
-- **Agreement rate:** Measures simple percentage match between VADER suggestions and final consensus manual labels (Rumusan Masalah #4).
+- **Agreement rate:** Measures the percentage match between VADER suggestions and final consensus labels (Research Question 4).
 - Automatic benchmark interpretation based on **Landis & Koch (1977)**:
   - `< 0.00` : Poor (worse than chance)
   - `0.00 – 0.20` : Slight
@@ -139,7 +139,7 @@ python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.
 - **Split integrity validation:** After splitting, the pipeline explicitly asserts that all 3 sentiment classes exist in both training and test sets, and verifies zero post_id and text intersections.
 - **Auditable fallback reporting:** If group splitting cannot be used (e.g., missing or insufficient `post_id`), `split_info` records an explicit `fallback_reason` (e.g., `"missing 'post_id' column"`).
 - **Leak-free text fallback:** Without usable post IDs, identical texts are assigned to the same `StratifiedGroupKFold` cluster. The analysis stops if there are too few independent clusters or if any class is absent from train or test.
-- **Reproducibility metadata:** `model_metrics.json` records the split strategy, group/cluster counts, train/test sizes and class counts, test fraction, random seed, and versioned model configuration for each game.
+- **Reproducibility metadata:** `model_metrics.json` records the split strategy, group/cluster counts, train/test sizes and class counts, requested and achieved test fractions, random seed, and versioned model configuration for each game.
 - **Majority-class baseline (`DummyClassifier`):** A dummy classifier predicting the most frequent class is trained alongside MultinomialNB as an honest reference point.
 - **Macro F1 prioritization:** Because sentiment classes can be imbalanced, Macro F1 is treated as the primary metric, supported by per-class Precision, Recall, and Confusion Matrices.
 
@@ -155,7 +155,7 @@ python -m src.sentiment_analysis --input data/processed/reddit_comments_labeled.
 
 ## Recorded runs
 
-Three historical model snapshots are committed under `data/processed/`. Their reported scores were produced before the current group-aware split safeguards, so they are retained as historical artifacts and must not be cited as results from the current implementation. The repository does not contain the source CSVs needed to regenerate them; rerun against the authorized final labeled datasets before reporting updated scores. The current code uses TF-IDF (unigrams + bigrams) + Multinomial Naive Bayes, with `random_state=42` and an 80/20 test fraction by default. `auto` uses group-aware splitting when possible and records any stratified fallback.
+Three historical model snapshots are committed under `data/processed/`. Their reported scores were produced before the current group-aware split safeguards, so they are retained as historical artifacts and must not be cited as results from the current implementation. The repository does not contain the source CSVs needed to regenerate them; rerun against the authorized final labeled datasets before reporting updated scores. The current code uses TF-IDF (unigrams + bigrams) + Multinomial Naive Bayes, with `random_state=42` and a target test fraction of 0.2 by default. `auto` uses post and identical-text groups when at least five valid post IDs exist; otherwise, it uses identical-text groups with `StratifiedGroupKFold`. For group splits, the achieved test fraction is approximate and can differ substantially from the target, especially for high requested fractions or large clusters. Each report records the actual fraction. Use `stratified` for a row-level split that targets the requested fraction; that strategy does not prevent post-level or duplicate-text leakage.
 
 ### 1. Full dataset (VADER automated labels) — `reddit_comments_labeled_analysis/`
 
@@ -231,8 +231,28 @@ pytest tests/ -v
 
 ## Research limitations
 
-- Naive Bayes learns from the supplied labels; it does not turn automatic labels into ground truth.
-- Comments from the same thread or author can be correlated; group-aware splitting mitigates post-level leakage but does not capture user-level dynamics across time.
-- TF-IDF and Multinomial Naive Bayes are baseline methods. Document preprocessing choices and limitations involving language, slang, negation, and sarcasm.
-- Comment sentiment does not establish a causal relationship between a game and community opinion.
-- Follow Reddit's terms, subreddit rules, and applicable ethics requirements; minimize the storage of personal information.
+### Data coverage and reproducibility
+
+- The study covers Reddit comments associated with `r/GlobalOffensive` and `r/VALORANT`, not all players, platforms, or gaming communities. Findings should not be generalized beyond this sampling frame without additional data.
+- The committed workspace does not contain the raw scrape, final labeled CSVs, or a sampling log. The collection period, post/comment selection procedure, and any sampling exclusions therefore cannot be independently checked from this repository. Preserve these details with the final research materials.
+- The three committed report snapshots are historical artifacts produced before the current group-aware split safeguards. Their JSON does not record current split metadata, so their scores are not directly comparable to a rerun with the current pipeline. Do not present them as current evaluation results.
+
+### Labels and agreement
+
+- VADER is a lexicon-based source of suggestions. Its suggestions can miss gaming slang, sarcasm, context, negation, and mixed sentiment; a model evaluated against `vader_auto` labels measures agreement with VADER, not validated human accuracy.
+- The documented 600-comment annotation sample has mean Cohen's Kappa of 0.4098 and Fleiss' Kappa of 0.4067. These values indicate meaningful disagreement between annotators, so labels and downstream scores contain annotation uncertainty. Landis–Koch categories are descriptive heuristics, not universal quality thresholds.
+- Pairwise Cohen scores use the rows available to each annotator pair, while Fleiss' Kappa uses only rows complete for every selected annotator. When annotations are missing, the metrics may describe different subsets. Kappa values can also change with category prevalence and annotator label distributions.
+- The repository documents a 300-comment-per-game manual subset, but it does not preserve the annotator instructions, recruitment details, adjudication procedure, or sampling method. Those are needed to assess how representative and repeatable the annotations are.
+
+### Model and evaluation
+
+- TF-IDF with unigram/bigram features and Multinomial Naive Bayes is a baseline. It represents words and short phrases without deeper context, and does not use post titles, thread context, authors, or comment history. Sarcasm, slang, code-switching, and sentiment targets that are not explicit in the comment can be difficult to classify.
+- The recorded results show weak and uneven class performance. In the historical snapshots, some classes have zero F1 (for example, negative in the full VALORANT VADER run, and negative/neutral in the manual VALORANT subset). Accuracy alone can hide this; report per-class precision/recall, Macro F1, support, and confusion matrices.
+- Each analysis uses one seeded holdout split and the first fold returned by the splitter. It does not estimate variation across repeated splits or provide confidence intervals. Group-aware `test_size` is a target: cluster sizes and fold assignment can make the achieved test fraction differ, sometimes substantially. The report records the achieved fraction.
+- Group splitting keeps identical text and, when usable `post_id` values exist, posts on one side of the split. It does not group by author, detect paraphrases or near-duplicate text, or model temporal dependence. The explicit `stratified` option is row-level and can place comments from the same post or duplicate texts on both sides; use it only when that evaluation design is intended.
+- The current reports do not include significance tests for CS2-versus-VALORANT score differences. Differences may reflect label distributions, sampling, or annotation quality as well as sentiment patterns; they do not establish that one game's community is more positive or negative.
+- Comment-level sentiment is observational and does not establish a causal relationship between a game and community opinion.
+
+### Ethics and privacy
+
+- Follow Reddit's terms, subreddit rules, and applicable ethics requirements. Minimize retained personal information, avoid publishing usernames, and document the handling of deleted or removed content.

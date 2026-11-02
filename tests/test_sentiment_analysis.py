@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.sentiment_analysis import analyze_dataset, load_dataset
+from src.sentiment_analysis import (
+    _build_leak_free_groups,
+    _split_game_indices,
+    analyze_dataset,
+    load_dataset,
+)
 
 
 class SentimentAnalysisTests(unittest.TestCase):
@@ -199,9 +204,17 @@ class SentimentAnalysisTests(unittest.TestCase):
             df.to_csv(input_path, index=False)
 
             metrics = analyze_dataset(input_path, output_dir, split_strategy="group")
-            # Verify no leaks and split_info fields
+            # Inspect returned row indices directly to prove both leak barriers.
             for game in ("cs2", "valorant"):
-                self.assertIn("n_clusters", metrics["games"][game]["split_info"])
+                game_rows = df.loc[df["game"] == game].reset_index(drop=True)
+                train_idx, test_idx, info = _split_game_indices(
+                    game_rows, "group", 0.2, 42, game
+                )
+                train_rows = game_rows.iloc[train_idx]
+                test_rows = game_rows.iloc[test_idx]
+                self.assertFalse(set(train_rows["post_id"]) & set(test_rows["post_id"]))
+                self.assertFalse(set(train_rows["text"]) & set(test_rows["text"]))
+                self.assertIn("n_clusters", info)
 
     def test_fallback_reason_recorded_when_post_id_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -219,7 +232,12 @@ class SentimentAnalysisTests(unittest.TestCase):
                 self.assertEqual(info["fallback_reason"], "missing 'post_id' column")
                 self.assertEqual(sum(info["train_class_counts"].values()), metrics["games"][game]["n_train"])
                 self.assertEqual(sum(info["test_class_counts"].values()), metrics["games"][game]["n_test"])
-                self.assertIn("n_text_groups", info)
+                self.assertIn("n_clusters", info)
+                self.assertEqual(info["n_text_groups"], info["n_clusters"])
+                self.assertAlmostEqual(
+                    info["actual_test_fraction"],
+                    metrics["games"][game]["n_test"] / metrics["games"][game]["n_samples"],
+                )
             self.assertEqual(metrics["random_state"], 42)
             self.assertEqual(metrics["model_config"]["version"], "tfidf_nb_v1")
 
@@ -248,6 +266,31 @@ class SentimentAnalysisTests(unittest.TestCase):
                 info = result["games"][game]["split_info"]
                 self.assertEqual(info["strategy"], "StratifiedGroupKFold")
                 self.assertEqual(info["grouping"], "identical_text_only")
+                game_rows = dataset.loc[dataset["game"] == game].reset_index(drop=True)
+                train_idx, test_idx, _ = _split_game_indices(
+                    game_rows, "auto", 0.2, 42, game
+                )
+                self.assertFalse(
+                    set(game_rows.iloc[train_idx]["text"])
+                    & set(game_rows.iloc[test_idx]["text"])
+                )
+
+    def test_stratified_strategy_uses_row_level_split(self) -> None:
+        game_rows = self._dataset().query("game == 'cs2'").reset_index(drop=True)
+        train_idx, test_idx, info = _split_game_indices(
+            game_rows, "stratified", 0.25, 42, "cs2"
+        )
+        self.assertEqual(info["strategy"], "StratifiedShuffleSplit")
+        self.assertEqual(len(train_idx) + len(test_idx), len(game_rows))
+
+    def test_cluster_ids_are_deterministic(self) -> None:
+        rows = pd.DataFrame({
+            "post_id": ["p2", "p1", "p3", "p4"],
+            "text": ["same", "same", "other", "last"],
+        })
+        first = _build_leak_free_groups(rows)
+        second = _build_leak_free_groups(rows)
+        pd.testing.assert_series_equal(first, second)
 
 
 if __name__ == "__main__":

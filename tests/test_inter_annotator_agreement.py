@@ -115,6 +115,11 @@ class TestInterAnnotatorAgreement(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "At least two annotators"):
             analyze_agreement(pd.DataFrame({"a": ["positive"]}), ["a"])
 
+    def test_missing_annotator_column_has_clear_error(self):
+        df = pd.DataFrame({"annotator_1": ["positive"]})
+        with self.assertRaisesRegex(ValueError, "Missing annotator columns: annotator_2"):
+            compute_pairwise_cohen_kappas(df, ["annotator_1", "annotator_2"])
+
     def test_interpretation(self):
         self.assertIn("Almost Perfect", interpret_kappa(0.85))
         self.assertIn("Substantial", interpret_kappa(0.70))
