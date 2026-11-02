@@ -1,7 +1,7 @@
 """TF-IDF and Multinomial Naive Bayes baseline for labeled Reddit data.
 
 Includes support for:
-- Standard stratified train/test split or group-aware StratifiedGroupKFold split by `post_id`
+- Explicit stratified row split or leak-aware group splits by `post_id` and/or identical text
 - Majority-class baseline (DummyClassifier) alongside MultinomialNB
 - Strict validation of `review_status`
 - Comprehensive evaluation focusing on Macro F1, weighted F1, per-class metrics, and confusion matrix
@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
+import numpy as np
 import pandas as pd
 from sklearn.dummy import DummyClassifier
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -23,7 +24,7 @@ from sklearn.metrics import (
     confusion_matrix,
     f1_score,
 )
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedGroupKFold, train_test_split
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline
 
@@ -63,8 +64,109 @@ def _build_leak_free_groups(
         union(("p", p), ("t", t))
 
     group_ids = {p: find(("p", p)) for p in posts}
-    cluster_map = {root: idx for idx, root in enumerate(set(group_ids.values()))}
+    roots = sorted(set(group_ids.values()), key=repr)
+    cluster_map = {root: idx for idx, root in enumerate(roots)}
     return df[group_col].map(lambda p: cluster_map[group_ids[p]])
+
+
+def _split_game_indices(
+    game_data: pd.DataFrame,
+    split_strategy: str,
+    test_size: float,
+    random_state: int,
+    game: str,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """Return deterministic train/test row indices and split metadata."""
+    if split_strategy == "stratified":
+        try:
+            train_idx, test_idx = train_test_split(
+                np.arange(len(game_data)),
+                test_size=test_size,
+                random_state=random_state,
+                stratify=game_data["sentiment"],
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"Could not create a stratified split for '{game}'. "
+                "Add more labeled examples or adjust test_size."
+            ) from error
+        return train_idx, test_idx, {"strategy": "StratifiedShuffleSplit"}
+
+    fallback_reason = None
+    can_group_by_post = (
+        "post_id" in game_data.columns
+        and not game_data["post_id"].isna().any()
+        and game_data["post_id"].nunique() >= 5
+    )
+    if split_strategy == "group" and not can_group_by_post:
+        if "post_id" not in game_data.columns:
+            fallback_reason = "missing 'post_id' column"
+        elif game_data["post_id"].isna().any():
+            fallback_reason = "'post_id' contains missing values"
+        else:
+            fallback_reason = (
+                f"only {game_data['post_id'].nunique()} distinct post_ids "
+                "(minimum 5 required)"
+            )
+        raise ValueError(
+            f"Requested 'group' split for '{game}', but cannot perform group splitting: "
+            f"{fallback_reason}."
+        )
+
+    if can_group_by_post:
+        groups = _build_leak_free_groups(
+            game_data, group_col="post_id", text_col="text"
+        )
+        split_info: dict[str, Any] = {
+            "strategy": "StratifiedGroupKFold",
+            "grouping": "post_id_and_identical_text",
+            "n_groups_total": int(game_data["post_id"].nunique()),
+        }
+    else:
+        if "post_id" not in game_data.columns:
+            fallback_reason = "missing 'post_id' column"
+        elif game_data["post_id"].isna().any():
+            fallback_reason = "'post_id' contains missing values"
+        else:
+            fallback_reason = (
+                f"only {game_data['post_id'].nunique()} distinct post_ids "
+                "(minimum 5 required)"
+            )
+        # Each row starts as a separate group; repeated texts join those groups.
+        rows = game_data.assign(_row_group=np.arange(len(game_data)))
+        groups = _build_leak_free_groups(
+            rows, group_col="_row_group", text_col="text"
+        )
+        split_info = {
+            "strategy": "StratifiedGroupKFold",
+            "grouping": "identical_text_only",
+            "fallback_reason": fallback_reason,
+        }
+
+    n_clusters = int(groups.nunique())
+    if n_clusters < 2:
+        raise ValueError(f"Not enough independent clusters for group split: {n_clusters}")
+    min_class_count = int(game_data["sentiment"].value_counts().min())
+    n_splits = max(
+        2, min(int(round(1.0 / test_size)), n_clusters, min_class_count)
+    )
+    splitter = StratifiedGroupKFold(
+        n_splits=n_splits, shuffle=True, random_state=random_state
+    )
+    train_idx, test_idx = next(
+        splitter.split(
+            game_data["text"], game_data["sentiment"], groups=groups
+        )
+    )
+    split_info["n_clusters"] = n_clusters
+    if can_group_by_post:
+        split_info["n_groups_train"] = int(
+            game_data.iloc[train_idx]["post_id"].nunique()
+        )
+        split_info["n_groups_test"] = int(
+            game_data.iloc[test_idx]["post_id"].nunique()
+        )
+    return train_idx, test_idx, split_info
 
 
 def load_dataset(input_path: Path) -> pd.DataFrame:
@@ -240,8 +342,9 @@ def analyze_dataset(
         output_dir: Destination folder for output reports.
         test_size: Approximate test fraction (default: 0.2).
         random_state: Seed for reproducibility.
-        split_strategy: 'auto', 'group', or 'stratified'. 'auto' uses group splitting
-            if 'post_id' exists with >= 5 groups, else stratified split.
+        split_strategy: 'auto', 'group', or 'stratified'. 'auto' uses post/text grouping
+            when at least five valid post IDs exist, otherwise identical-text grouping.
+            'group' requires usable post IDs; 'stratified' uses a standard row-level split.
     """
     if not 0 < test_size < 1:
         raise ValueError("test_size must be between 0 and 1.")
@@ -293,114 +396,30 @@ def analyze_dataset(
                 + ", ".join(too_small)
             )
 
-        # Decide split strategy
-        use_group = False
-        fallback_reason = None
-        if split_strategy in ("auto", "group"):
-            if "post_id" not in game_data.columns:
-                fallback_reason = "missing 'post_id' column"
-            elif game_data["post_id"].isna().any():
-                fallback_reason = "'post_id' contains missing values"
-            elif game_data["post_id"].nunique() < 5:
-                fallback_reason = f"only {game_data['post_id'].nunique()} distinct post_ids (minimum 5 required)"
-            else:
-                use_group = True
+        train_idx, test_idx, split_info = _split_game_indices(
+            game_data,
+            split_strategy=split_strategy,
+            test_size=test_size,
+            random_state=random_state,
+            game=game,
+        )
+        train_text = game_data.iloc[train_idx]["text"]
+        train_labels = game_data.iloc[train_idx]["sentiment"]
+        test_text = game_data.iloc[test_idx]["text"]
+        test_labels = game_data.iloc[test_idx]["sentiment"]
 
-            if split_strategy == "group" and not use_group:
+        if split_info["strategy"] == "StratifiedGroupKFold":
+            if "post_id" in game_data.columns and not game_data["post_id"].isna().any() and split_info["grouping"] == "post_id_and_identical_text":
+                post_train = set(game_data.iloc[train_idx]["post_id"])
+                post_test = set(game_data.iloc[test_idx]["post_id"])
+                if post_train & post_test:
+                    raise ValueError(
+                        f"Group split leak detected for '{game}': post_ids overlap between train and test."
+                    )
+            if set(train_text) & set(test_text):
                 raise ValueError(
-                    f"Requested 'group' split for '{game}', but cannot perform group splitting: {fallback_reason}."
+                    f"Text duplicate leak detected for '{game}': identical texts overlap between train and test."
                 )
-
-        if use_group:
-            # Build leak-free super-groups combining post_id and shared text
-            clusters = _build_leak_free_groups(game_data, group_col="post_id", text_col="text")
-            n_clusters = clusters.nunique()
-            if n_clusters < 2:
-                raise ValueError(
-                    f"Not enough independent clusters for group split: {n_clusters}"
-                )
-            min_class_count = int(class_counts.min())
-            n_splits = int(round(1.0 / test_size)) if test_size > 0 else 5
-            n_splits = min(n_splits, n_clusters, min_class_count)
-            n_splits = max(2, n_splits)
-            sgkf = StratifiedGroupKFold(
-                n_splits=n_splits, shuffle=True, random_state=random_state
-            )
-            train_idx, test_idx = next(
-                sgkf.split(
-                    game_data["text"],
-                    game_data["sentiment"],
-                    groups=clusters,
-                )
-            )
-            train_text = game_data.iloc[train_idx]["text"]
-            train_labels = game_data.iloc[train_idx]["sentiment"]
-            test_text = game_data.iloc[test_idx]["text"]
-            test_labels = game_data.iloc[test_idx]["sentiment"]
-
-            # Validate split integrity: post_id and text disjointness
-            post_train = set(game_data.iloc[train_idx]["post_id"])
-            post_test = set(game_data.iloc[test_idx]["post_id"])
-            post_intersection = post_train.intersection(post_test)
-            if post_intersection:
-                raise ValueError(
-                    f"Group split leak detected for '{game}': {len(post_intersection)} post_ids appear in both train and test."
-                )
-
-            text_train = set(train_text)
-            text_test = set(test_text)
-            text_intersection = text_train.intersection(text_test)
-            if text_intersection:
-                raise ValueError(
-                    f"Text duplicate leak detected for '{game}': {len(text_intersection)} identical text(s) appear in both train and test."
-                )
-
-            split_info = {
-                "strategy": "StratifiedGroupKFold",
-                "n_groups_total": int(game_data["post_id"].nunique()),
-                "n_clusters": int(n_clusters),
-                "n_groups_train": int(len(post_train)),
-                "n_groups_test": int(len(post_test)),
-            }
-        else:
-            # Group by text even when there are no duplicates today, so this
-            # fallback cannot silently become leaky when duplicate rows appear.
-            rows = game_data.assign(_row_group=range(len(game_data)))
-            text_groups = _build_leak_free_groups(
-                rows, group_col="_row_group", text_col="text"
-            )
-            n_text_groups = int(text_groups.nunique())
-            if n_text_groups < 2:
-                raise ValueError(
-                    f"Not enough independent text clusters for split: {n_text_groups}"
-                )
-            n_splits = max(
-                2,
-                min(
-                    int(round(1.0 / test_size)),
-                    n_text_groups,
-                    int(class_counts.min()),
-                ),
-            )
-            splitter = StratifiedGroupKFold(
-                n_splits=n_splits, shuffle=True, random_state=random_state
-            )
-            train_idx, test_idx = next(
-                splitter.split(
-                    game_data["text"], game_data["sentiment"], groups=text_groups
-                )
-            )
-            train_text = game_data.iloc[train_idx]["text"]
-            train_labels = game_data.iloc[train_idx]["sentiment"]
-            test_text = game_data.iloc[test_idx]["text"]
-            test_labels = game_data.iloc[test_idx]["sentiment"]
-            split_info = {
-                "strategy": "StratifiedGroupKFold",
-                "grouping": "identical_text_only",
-                "n_text_groups": n_text_groups,
-            }
-            if fallback_reason:
-                split_info["fallback_reason"] = fallback_reason
 
         # Post-split class distribution validation
         missing_train = set(SENTIMENTS) - set(train_labels.unique())
@@ -488,7 +507,7 @@ def main() -> None:
         type=str,
         choices=["auto", "group", "stratified"],
         default="auto",
-        help="Data split strategy: 'auto' (group split if post_id exists, else stratified), "
+        help="Data split strategy: 'auto' (post/text group split when possible, else text groups), "
         "'group' (enforce post_id StratifiedGroupKFold), or 'stratified' (standard stratified).",
     )
     args = parser.parse_args()

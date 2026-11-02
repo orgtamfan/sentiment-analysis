@@ -43,10 +43,14 @@ def normalize_labels(df: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:
     Raises:
         ValueError: If any unrecognized categorical value is encountered.
     """
+    missing_columns = sorted(set(columns) - set(df.columns))
+    if missing_columns:
+        raise ValueError(
+            "Missing annotator columns: " + ", ".join(missing_columns)
+        )
+
     result = df.copy()
     for col in columns:
-        if col not in result.columns:
-            continue
         cleaned = (
             result[col]
             .astype("string")
