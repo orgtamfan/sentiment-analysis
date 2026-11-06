@@ -125,6 +125,10 @@ Key methodological features:
   - `0.61 – 0.80` : Substantial
   - `0.81 – 1.00` : Almost Perfect
 
+### VADER vs. manual consensus agreement rate
+
+The agreement-rate result is **not currently available** in this repository. Calculating it requires paired `sentiment_suggestion` and `sentiment_final` values for the same comments. The annotation CSV, VADER review CSV, and source spreadsheet are not included here; committed report snapshots contain only aggregate model metrics and class distributions, which are insufficient to recover the number of matches. Do not infer or report a percentage from those snapshots. When the paired source data is available, run the agreement command above and record its `Matched` count, valid sample count, and agreement percentage here.
+
 ### Annotator agreement on 600 sample comments:
 
 | Metric | Overall | CS2 (N=300) | VALORANT (N=300) |
