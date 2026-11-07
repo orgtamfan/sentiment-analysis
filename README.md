@@ -127,7 +127,7 @@ Key methodological features:
 
 ### VADER vs. manual consensus agreement rate
 
-The agreement-rate result is **not currently available** in this repository. Calculating it requires paired `sentiment_suggestion` and `sentiment_final` values for the same comments. The annotation CSV, VADER review CSV, and source spreadsheet are not included here; committed report snapshots contain only aggregate model metrics and class distributions, which are insufficient to recover the number of matches. Do not infer or report a percentage from those snapshots. When the paired source data is available, run the agreement command above and record its `Matched` count, valid sample count, and agreement percentage here.
+Research Question 4, the agreement rate between VADER suggestions and manual consensus, **cannot be answered from the data currently available in this repository**. Calculating it requires paired `sentiment_suggestion` and `sentiment_final` values for the same comments. The annotation CSV, VADER review CSV, and source spreadsheet are not included; committed report snapshots contain only aggregate model metrics and class distributions, which are insufficient to recover the number of matches. Therefore, no agreement-rate percentage is reported, and this is a limitation of the current research materials—not simply a result that has yet to be calculated. Do not infer a percentage from the available snapshots.
 
 ### Annotator agreement on 600 sample comments:
 
@@ -288,6 +288,7 @@ pytest tests/ -v
 ### Labels and agreement
 
 - VADER is a lexicon-based source of suggestions. Its suggestions can miss gaming slang, sarcasm, context, negation, and mixed sentiment; a model evaluated against `vader_auto` labels measures agreement with VADER, not validated human accuracy.
+- Research Question 4 (VADER-versus-manual-consensus agreement rate) cannot be answered from the materials currently available: the paired per-comment VADER suggestions and final manual labels, along with their source files, are absent. The agreement percentage must not be estimated from aggregate report snapshots; this missing paired data is an explicit limitation of the study as documented here.
 - The documented 600-comment annotation sample has mean Cohen's Kappa of 0.4098 and Fleiss' Kappa of 0.4067. These values indicate meaningful disagreement between annotators, so labels and downstream scores contain annotation uncertainty. Landis–Koch categories are descriptive heuristics, not universal quality thresholds.
 - Pairwise Cohen scores use the rows available to each annotator pair, while Fleiss' Kappa uses only rows complete for every selected annotator. When annotations are missing, the metrics may describe different subsets. Kappa values can also change with category prevalence and annotator label distributions.
 - The label guidance and three-rater majority-vote rule are documented above. The subset uses the first 300 comments from each game's set rather than a documented random sample, so selection bias is possible. Annotator recruitment details and the source ordering basis are not recorded, which limits assessment of representativeness.
